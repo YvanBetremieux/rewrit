@@ -1,0 +1,73 @@
+# Dependencies
+node_modules/
+target/
+backend/venv/
+backend/__pycache__/
+
+# Build outputs
+dist/
+build/
+*.dmg
+*.msi
+*.app
+*.exe
+
+# Environment
+.env
+*.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Tauri
+src-tauri/target/
+src-tauri/Cargo.lock
+
+# Python
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# User data
+.rewrit/
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Claude Code & BMAD
+.claude/
+_bmad/
+_bmad-output/
+
+# Benchmark & test files
+benchmark.py
+benchmark.sh
+test.txt
