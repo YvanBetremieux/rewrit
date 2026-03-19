@@ -47,7 +47,13 @@ Go to [Releases](https://github.com/YvanBetremieux/rewrit/releases) and download
 
 ### First launch (macOS)
 
-macOS will ask for **Accessibility permissions** — this is required to capture keyboard shortcuts and simulate copy/paste. Go to **System Settings > Privacy & Security > Accessibility** and enable rewrit.
+The app is not signed with an Apple Developer certificate. macOS will block it by default. Run this once after installing:
+
+```bash
+xattr -cr /Applications/rewrit.app
+```
+
+Then macOS will ask for **Accessibility permissions** — this is required to capture keyboard shortcuts and simulate copy/paste. Go to **System Settings > Privacy & Security > Accessibility** and enable rewrit.
 
 ## Setup
 
