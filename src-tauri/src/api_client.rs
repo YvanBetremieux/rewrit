@@ -1,7 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-const API_BASE_URL: &str = "http://localhost:8000/api/v1";
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct QuotaInfo {
     pub used: i32,
@@ -46,18 +44,22 @@ pub struct RegisterResponse {
 pub struct ApiClient {
     client: reqwest::Client,
     device_id: String,
+    base_url: String,
 }
 
 impl ApiClient {
     pub fn new(device_id: String) -> Self {
+        let base_url = std::env::var("REWRIT_API_URL")
+            .unwrap_or_else(|_| "http://localhost:8000/api/v1".to_string());
         Self {
             client: reqwest::Client::new(),
             device_id,
+            base_url,
         }
     }
 
     pub async fn register(&self, platform: String) -> Result<RegisterResponse, String> {
-        let url = format!("{}/register", API_BASE_URL);
+        let url = format!("{}/register", self.base_url);
         let request = RegisterRequest {
             platform,
             app_version: "1.0.0".to_string(),
@@ -81,7 +83,7 @@ impl ApiClient {
     }
 
     pub async fn fetch_quota(&self) -> Result<QuotaResponse, String> {
-        let url = format!("{}/quota", API_BASE_URL);
+        let url = format!("{}/quota", self.base_url);
 
         match self
             .client
@@ -99,7 +101,7 @@ impl ApiClient {
     }
 
     pub async fn report_usage(&self) -> Result<QuotaInfo, String> {
-        let url = format!("{}/usage/report", API_BASE_URL);
+        let url = format!("{}/usage/report", self.base_url);
 
         match self
             .client
@@ -126,7 +128,7 @@ impl ApiClient {
     }
 
     pub async fn reset_quota(&self) -> Result<QuotaInfo, String> {
-        let url = format!("{}/quota/reset", API_BASE_URL);
+        let url = format!("{}/quota/reset", self.base_url);
 
         match self
             .client

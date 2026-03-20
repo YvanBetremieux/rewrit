@@ -156,6 +156,26 @@ pub fn set_llm_provider(provider: &str) -> Result<(), String> {
         .map_err(|e| format!("Failed to save LLM provider: {}", e))
 }
 
+pub fn get_shortcuts() -> Vec<(String, String)> {
+    let path = get_config_dir().join("shortcuts.json");
+    if path.exists() {
+        if let Ok(data) = fs::read_to_string(&path) {
+            if let Ok(shortcuts) = serde_json::from_str::<Vec<(String, String)>>(&data) {
+                return shortcuts;
+            }
+        }
+    }
+    Vec::new()
+}
+
+pub fn set_shortcuts(shortcuts: &[(String, String)]) -> Result<(), String> {
+    let path = get_config_dir().join("shortcuts.json");
+    let json = serde_json::to_string(shortcuts)
+        .map_err(|e| format!("Failed to serialize shortcuts: {}", e))?;
+    fs::write(&path, json)
+        .map_err(|e| format!("Failed to save shortcuts: {}", e))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

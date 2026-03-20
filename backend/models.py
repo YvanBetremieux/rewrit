@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, Integer, String, DateTime, Date, ForeignKey, Text
+from sqlalchemy import Boolean, Column, Integer, String, DateTime, Date, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -47,8 +47,7 @@ class DailyQuota(Base):
     actions_used = Column(Integer, default=0)
     quota_limit = Column(Integer, default=5)
 
+    __table_args__ = (UniqueConstraint('user_id', 'quota_date', name='uq_user_quota_date'),)
+
     # Relationship
     user = relationship("User", back_populates="daily_quotas")
-
-    class Config:
-        unique_together = [["user_id", "quota_date"]]

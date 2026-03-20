@@ -25,6 +25,12 @@ pub struct ShortcutConfig {
     pub prompt: String,
 }
 
+// NOTE: Mutex .unwrap() calls throughout this file are intentional.
+// The global shortcut handler wraps all shortcut logic in std::panic::catch_unwind
+// (see the with_handler closure in setup), so if a mutex is poisoned by a panic,
+// the catch_unwind boundary prevents crash propagation and resets is_processing.
+// The only mutex that uses unwrap_or_else(|e| e.into_inner()) is is_processing
+// itself, inside that catch_unwind recovery path.
 struct AppState {
     api_client: Mutex<Option<ApiClient>>,
     llm_client: Mutex<Option<LlmClient>>,
@@ -736,7 +742,9 @@ async fn add_shortcut(
         .map_err(|e| format!("Failed to register shortcut: {}", e))?;
 
     let config = ShortcutConfig { id: id.clone(), shortcut, prompt };
-    state.shortcuts.lock().unwrap().insert(id, config.clone());
+    let mut shortcuts = state.shortcuts.lock().unwrap();
+    shortcuts.insert(id, config.clone());
+    persist_shortcuts(&shortcuts);
     Ok(config)
 }
 
@@ -758,6 +766,7 @@ async fn remove_shortcut(
         .map_err(|e| format!("Failed to unregister shortcut: {}", e))?;
 
     shortcuts.remove(&id);
+    persist_shortcuts(&shortcuts);
     Ok(())
 }
 
@@ -801,7 +810,9 @@ async fn update_shortcut(
         config.prompt = new_prompt;
     }
 
-    Ok(config.clone())
+    let result = config.clone();
+    persist_shortcuts(&shortcuts);
+    Ok(result)
 }
 
 #[tauri::command]
@@ -1100,6 +1111,15 @@ async fn report_usage_to_backend(state: &State<'_, AppState>, app: &AppHandle) {
 }
 
 // --- Shortcut handling ---
+
+fn persist_shortcuts(shortcuts: &HashMap<String, ShortcutConfig>) {
+    let entries: Vec<(String, String)> = shortcuts.values()
+        .map(|s| (s.shortcut.clone(), s.prompt.clone()))
+        .collect();
+    if let Err(e) = device_id::set_shortcuts(&entries) {
+        eprintln!("[rewrit] failed to persist shortcuts: {}", e);
+    }
+}
 
 fn normalize_shortcut(shortcut: &str) -> String {
     let normalized = shortcut.to_lowercase()
@@ -1539,7 +1559,7 @@ pub fn run() {
                 .menu(&menu)
                 .on_menu_event(move |app, event| {
                     match event.id.as_ref() {
-                        "quit" => std::process::exit(0),
+                        "quit" => app.exit(0),
                         "settings" => {
                             if let Some(window) = app.get_webview_window("main") {
                                 let _ = window.show();
@@ -1571,18 +1591,23 @@ pub fn run() {
 
             println!("✅ Tray icon created");
 
-            // Register default shortcuts
+            // Register shortcuts (load persisted, or use defaults)
             {
                 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
                 let state: State<AppState> = app.handle().state();
                 let mut shortcuts = state.shortcuts.lock().unwrap();
 
-                let defaults = [
-                    ("CommandOrControl+Alt+Y", "Translate this text from French to English"),
-                    ("CommandOrControl+Alt+T", "Translate this text from English to French"),
-                ];
+                let persisted = device_id::get_shortcuts();
+                let entries: Vec<(String, String)> = if persisted.is_empty() {
+                    vec![
+                        ("CommandOrControl+Alt+Y".to_string(), "Translate this text from French to English".to_string()),
+                        ("CommandOrControl+Alt+T".to_string(), "Translate this text from English to French".to_string()),
+                    ]
+                } else {
+                    persisted
+                };
 
-                for (shortcut_str, prompt) in defaults {
+                for (shortcut_str, prompt) in &entries {
                     if let Ok(shortcut) = shortcut_str.parse::<Shortcut>() {
                         if app.global_shortcut().register(shortcut).is_ok() {
                             let id = format!("shortcut_{}", &uuid::Uuid::new_v4().to_string()[..8]);

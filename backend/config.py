@@ -21,7 +21,7 @@ class Config:
     PORT = int(os.getenv("PORT", 8000))
 
     # CORS
-    ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+    ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "tauri://localhost,http://localhost:5173,http://localhost:8000").split(",")
 
     # Quota Configuration
     DAILY_QUOTA_LIMIT = int(os.getenv("DAILY_QUOTA_LIMIT", 5))

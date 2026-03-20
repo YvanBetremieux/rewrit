@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Depends, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 import time
 
@@ -72,7 +72,7 @@ class TranslateResponse(BaseModel):
 # Helper functions
 def get_next_midnight_utc() -> datetime:
     """Get next midnight UTC"""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     tomorrow = now + timedelta(days=1)
     next_midnight = datetime(tomorrow.year, tomorrow.month, tomorrow.day)
     return next_midnight
@@ -94,7 +94,7 @@ def get_or_create_user(db: Session, device_id: str) -> User:
         db.refresh(user)
 
     # Update last seen
-    user.last_seen_at = datetime.utcnow()
+    user.last_seen_at = datetime.now(timezone.utc)
     db.commit()
 
     return user
