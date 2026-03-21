@@ -16,7 +16,7 @@ class Config:
     # API Keys (LLM calls are handled client-side via BYOK)
 
     # Environment
-    ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+    ENVIRONMENT = os.getenv("ENVIRONMENT", "production")
     PORT = int(os.getenv("PORT", 8000))
 
     # CORS

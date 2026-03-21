@@ -121,6 +121,8 @@ struct OllamaResponse {
     message: Message,
 }
 
+const SYSTEM_PROMPT: &str = "You are a helpful text transformation assistant. Apply the user's instruction to the provided text. Return ONLY the transformed result, nothing else. No explanations, no quotes, no parentheses. Preserve the exact formatting: keep all line breaks and internal whitespace structure.";
+
 impl LlmClient {
     pub fn new(provider: LlmProvider, api_key: String) -> Self {
         let model = provider.default_model().to_string();
@@ -139,7 +141,7 @@ impl LlmClient {
         let start_time = Instant::now();
         let provider_name = self.provider.display_name();
 
-        let system_prompt = "You are a helpful text transformation assistant. Apply the user's instruction to the provided text. Return ONLY the transformed result, nothing else. No explanations, no quotes, no parentheses. Preserve the exact formatting: keep all line breaks and internal whitespace structure.".to_string();
+        let system_prompt = SYSTEM_PROMPT.to_string();
 
         // Extract leading/trailing whitespace to restore after transformation
         let leading_ws = &text[..text.len() - text.trim_start().len()];
@@ -268,15 +270,13 @@ impl LlmClient {
         let start_time = Instant::now();
         let provider_name = self.provider.display_name();
 
-        let system_prompt = "You are a helpful text transformation assistant. Apply the user's instruction to the provided text. Return ONLY the transformed result, nothing else. No explanations, no quotes, no parentheses. Preserve the exact formatting: keep all line breaks and internal whitespace structure.".to_string();
-
         let leading_ws = &text[..text.len() - text.trim_start().len()];
         let trailing_ws = &text[text.trim_end().len()..];
         let trimmed_text = text.trim().to_string();
         let user_message = format!("Instruction: {}\n\nText to transform:\n{}", user_prompt, trimmed_text);
 
         let messages = vec![
-            ChatMessage { role: "system".to_string(), content: system_prompt },
+            ChatMessage { role: "system".to_string(), content: SYSTEM_PROMPT.to_string() },
             ChatMessage { role: "user".to_string(), content: user_message },
         ];
 

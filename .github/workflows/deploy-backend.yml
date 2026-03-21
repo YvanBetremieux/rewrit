@@ -26,7 +26,7 @@ jobs:
             # Pull latest backend files
             cd /tmp
             rm -rf rewrit-deploy
-            git clone --depth 1 --filter=blob:none --sparse https://${{ secrets.GH_PAT }}@github.com/YvanBetremieux/rewrit.git rewrit-deploy
+            git -c "url.https://${{ secrets.GH_PAT }}@github.com/.insteadOf=https://github.com/" clone --depth 1 --filter=blob:none --sparse https://github.com/YvanBetremieux/rewrit.git rewrit-deploy
             cd rewrit-deploy
             git sparse-checkout set backend
             # Copy files
@@ -36,5 +36,4 @@ jobs:
             source venv/bin/activate
             pip install -q -r requirements.txt
             sudo systemctl restart rewrit
-            # Cleanup
             rm -rf /tmp/rewrit-deploy

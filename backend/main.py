@@ -1,10 +1,16 @@
 # rewrit backend API v1.0
-from fastapi import FastAPI, Depends, HTTPException, Header
+import logging
+from fastapi import FastAPI, Depends, HTTPException, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 import time
+
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from database import engine, get_db, Base
 from models import User, DailyQuota, UsageLog
@@ -12,12 +18,33 @@ from config import Config, get_mock_translation
 from pydantic import BaseModel
 import uuid as uuid_lib
 
+logger = logging.getLogger("rewrit")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(levelname)s %(message)s",
+)
+
+# Rate limiter
+limiter = Limiter(key_func=get_remote_address)
+
 # Create tables
 Base.metadata.create_all(bind=engine)
 
 _docs_url = "/docs" if Config.ENVIRONMENT == "development" else None
 _redoc_url = "/redoc" if Config.ENVIRONMENT == "development" else None
 app = FastAPI(title="rewrit API", version="1.0.0", docs_url=_docs_url, redoc_url=_redoc_url)
+
+# Rate limiting middleware
+app.state.limiter = limiter
+app.add_middleware(SlowAPIMiddleware)
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        status_code=429,
+        content={"detail": "Too many requests. Please slow down."},
+    )
 
 # CORS middleware
 app.add_middleware(
@@ -28,8 +55,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-print("ℹ️  Backend manages quota and device registration")
-print("   → AI translation is handled by Tauri frontend (Groq API)")
+logger.info("Backend manages quota and device registration")
+logger.info("AI translation is handled by Tauri frontend (Groq API)")
 
 
 # Pydantic models
@@ -179,8 +206,10 @@ async def get_status():
 
 
 @app.post("/api/v1/register", response_model=RegisterResponse)
+@limiter.limit(f"{Config.RATE_LIMIT_PER_SECOND}/second;{Config.RATE_LIMIT_PER_HOUR}/hour")
 async def register(
-    request: RegisterRequest,
+    request: Request,
+    body: RegisterRequest,
     x_device_id: str = Header(..., alias="X-Device-ID"),
     db: Session = Depends(get_db),
 ):
@@ -195,7 +224,9 @@ async def register(
 
 
 @app.get("/api/v1/quota", response_model=QuotaResponse)
+@limiter.limit(f"{Config.RATE_LIMIT_PER_SECOND}/second;{Config.RATE_LIMIT_PER_HOUR}/hour")
 async def get_quota(
+    request: Request,
     x_device_id: str = Header(..., alias="X-Device-ID"), db: Session = Depends(get_db)
 ):
     """Get quota information for a device"""
@@ -207,20 +238,21 @@ async def get_quota(
 
 
 @app.post("/api/v1/translate", response_model=TranslateResponse)
+@limiter.limit(f"{Config.RATE_LIMIT_PER_SECOND}/second;{Config.RATE_LIMIT_PER_HOUR}/hour")
 async def translate(
-    request: TranslateRequest,
+    request: Request,
+    body: TranslateRequest,
     x_device_id: str = Header(..., alias="X-Device-ID"),
     db: Session = Depends(get_db),
 ):
     """Translate text"""
     start_time = time.time()
 
-
     # Validate input
-    if not request.text or len(request.text.strip()) == 0:
+    if not body.text or len(body.text.strip()) == 0:
         raise HTTPException(status_code=400, detail="Text cannot be empty")
 
-    if len(request.text) > 5000:
+    if len(body.text) > 5000:
         raise HTTPException(status_code=400, detail="Text too long (max 5000 characters)")
 
     # Get user
@@ -237,7 +269,7 @@ async def translate(
         target_lang = "fr"
 
         # Mock translate (real AI translation is done client-side via Groq)
-        translated_text = translate_text_mock(request.text, source_lang, target_lang)
+        translated_text = translate_text_mock(body.text, source_lang, target_lang)
         # Calculate processing time
         processing_time = int((time.time() - start_time) * 1000)
 
@@ -245,7 +277,7 @@ async def translate(
         log_entry = UsageLog(
             user_id=user.id,
             action_type="translate",
-            input_text_length=len(request.text),
+            input_text_length=len(body.text),
             output_text_length=len(translated_text),
             processing_time_ms=processing_time,
             success=True,
@@ -257,7 +289,7 @@ async def translate(
         db.commit()
         return TranslateResponse(
             success=True,
-            original_text=request.text,
+            original_text=body.text,
             translated_text=translated_text,
             detected_language=source_lang,
             target_language=target_lang,
@@ -267,11 +299,11 @@ async def translate(
 
     except Exception as e:
         # Log failed action (full error server-side only)
-        print(f"[rewrit] translate error: {e}")
+        logger.error("translate error: %s", e)
         log_entry = UsageLog(
             user_id=user.id,
             action_type="translate",
-            input_text_length=len(request.text),
+            input_text_length=len(body.text),
             success=False,
             error_message=str(e),
         )
@@ -287,7 +319,9 @@ async def translate(
 
 
 @app.post("/api/v1/usage/report")
+@limiter.limit(f"{Config.RATE_LIMIT_PER_SECOND}/second;{Config.RATE_LIMIT_PER_HOUR}/hour")
 async def report_usage(
+    request: Request,
     x_device_id: str = Header(..., alias="X-Device-ID"),
     db: Session = Depends(get_db),
 ):
@@ -313,7 +347,9 @@ async def report_usage(
 
 
 @app.post("/api/v1/quota/reset")
+@limiter.limit(f"{Config.RATE_LIMIT_PER_SECOND}/second;{Config.RATE_LIMIT_PER_HOUR}/hour")
 async def reset_quota(
+    request: Request,
     x_device_id: str = Header(..., alias="X-Device-ID"),
     db: Session = Depends(get_db)
 ):
@@ -321,12 +357,11 @@ async def reset_quota(
 
     # Only allow in development mode
     if Config.ENVIRONMENT != "development":
-        print("⚠️  Quota reset: DISABLED (not in development mode)")
+        logger.warning("Quota reset: DISABLED (not in development mode)")
         raise HTTPException(status_code=403, detail="This endpoint is only available in development mode")
 
     # Get user (pass string, function will convert to UUID)
     user = get_or_create_user(db, x_device_id)
-    print(user)
 
     # Get or create today's quota
     today = datetime.now(timezone.utc).date()
@@ -350,10 +385,11 @@ async def reset_quota(
 if __name__ == "__main__":
     import uvicorn
 
+    is_dev = Config.ENVIRONMENT == "development"
     uvicorn.run(
         "main:app",  # Import string format for reload to work
         host="0.0.0.0",
-        port=8000,
-        reload=True,  # Enable hot reload for development
-        reload_dirs=["./"]  # Watch current directory for changes
+        port=Config.PORT,
+        reload=is_dev,
+        reload_dirs=["./"] if is_dev else None,
     )
