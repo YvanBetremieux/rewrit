@@ -1,3 +1,4 @@
+# rewrit backend API
 from fastapi import FastAPI, Depends, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -80,15 +81,16 @@ def get_next_midnight_utc() -> datetime:
 
 def get_or_create_user(db: Session, device_id: str) -> User:
     """Get or create user by device ID"""
+    # Validate UUID format
     try:
-        device_uuid = uuid_lib.UUID(device_id)
+        uuid_lib.UUID(device_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid device ID format")
 
-    user = db.query(User).filter(User.device_id == device_uuid).first()
+    user = db.query(User).filter(User.device_id == device_id).first()
 
     if not user:
-        user = User(device_id=device_uuid)
+        user = User(device_id=device_id)
         db.add(user)
         db.commit()
         db.refresh(user)
