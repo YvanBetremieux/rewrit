@@ -1,7 +1,7 @@
 <script>
   import { toastStore } from '../stores/toast.js';
   import { CheckCircle, AlertCircle, Info, AlertTriangle } from 'lucide-svelte';
-  import { fade, fly } from 'svelte/transition';
+  import { fly } from 'svelte/transition';
 
   let toast;
   toastStore.subscribe(value => {

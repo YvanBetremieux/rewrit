@@ -1,5 +1,6 @@
 <script>
   import { quotaStore } from '../stores/quota.js';
+  import { getTimeUntilReset } from '../utils/time.js';
   import { AlertTriangle, Clock, Sparkles, X } from 'lucide-svelte';
   import { fade, scale } from 'svelte/transition';
 
@@ -9,21 +10,6 @@
   quotaStore.subscribe(value => {
     quota = value;
   });
-
-  function getTimeUntilReset() {
-    if (!quota.resetsAt) return '';
-
-    const now = new Date();
-    const reset = new Date(quota.resetsAt);
-    const diff = reset - now;
-
-    if (diff <= 0) return '0h 0min';
-
-    const hours = Math.floor(diff / (1000 * 60 * 60));
-    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-
-    return `${hours}h ${minutes}min`;
-  }
 
   function close() {
     visible = false;
@@ -78,7 +64,7 @@
       <div class="bg-gray-100 dark:bg-gray-700 rounded-lg p-4 mb-6">
         <div class="flex items-center justify-center gap-2 text-2xl font-bold text-gray-900 dark:text-white">
           <Clock size={24} class="text-blue-600" />
-          {getTimeUntilReset()}
+          {getTimeUntilReset(quota.resetsAt)}
         </div>
       </div>
 

@@ -77,7 +77,7 @@ def get_next_midnight_utc() -> datetime:
     """Get next midnight UTC"""
     now = datetime.now(timezone.utc)
     tomorrow = now + timedelta(days=1)
-    next_midnight = datetime(tomorrow.year, tomorrow.month, tomorrow.day)
+    next_midnight = datetime(tomorrow.year, tomorrow.month, tomorrow.day, tzinfo=timezone.utc)
     return next_midnight
 
 
@@ -138,7 +138,7 @@ def build_quota_info(quota: DailyQuota) -> QuotaInfo:
 
 def check_and_decrement_quota(db: Session, user: User) -> tuple[bool, QuotaInfo]:
     """Check if user has quota and decrement if available"""
-    today = date.today()
+    today = datetime.now(timezone.utc).date()
     quota = get_or_create_daily_quota(db, user.id, today)
 
     quota_info = build_quota_info(quota)
@@ -186,7 +186,7 @@ async def register(
 ):
     """Register a new device"""
     user = get_or_create_user(db, x_device_id)
-    today = date.today()
+    today = datetime.now(timezone.utc).date()
     quota = get_or_create_daily_quota(db, user.id, today)
 
     return RegisterResponse(
@@ -200,7 +200,7 @@ async def get_quota(
 ):
     """Get quota information for a device"""
     user = get_or_create_user(db, x_device_id)
-    today = date.today()
+    today = datetime.now(timezone.utc).date()
     quota = get_or_create_daily_quota(db, user.id, today)
 
     return QuotaResponse(quota=build_quota_info(quota), is_pro=user.is_pro)
@@ -266,7 +266,8 @@ async def translate(
         )
 
     except Exception as e:
-        # Log failed action
+        # Log failed action (full error server-side only)
+        print(f"[rewrit] translate error: {e}")
         log_entry = UsageLog(
             user_id=user.id,
             action_type="translate",
@@ -280,7 +281,7 @@ async def translate(
         return TranslateResponse(
             success=False,
             error="translation_failed",
-            message=f"Service temporarily unavailable: {str(e)}",
+            message="Service temporarily unavailable",
             quota=quota_info,
         )
 
@@ -298,6 +299,13 @@ async def report_usage(
     if not quota_allowed:
         raise HTTPException(status_code=403, detail="Quota exceeded")
 
+    # Log the action
+    log_entry = UsageLog(
+        user_id=user.id,
+        action_type="translate_client",
+        success=True,
+    )
+    db.add(log_entry)
     user.total_actions_count += 1
     db.commit()
 
@@ -321,7 +329,7 @@ async def reset_quota(
     print(user)
 
     # Get or create today's quota
-    today = date.today()
+    today = datetime.now(timezone.utc).date()
     quota = get_or_create_daily_quota(db, user.id, today)
 
     # Reset to 0 and update quota_limit from config

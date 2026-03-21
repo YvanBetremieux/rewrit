@@ -20,16 +20,19 @@ Desktop application that transforms text instantly via global keyboard shortcuts
 - **Lucide Icons**: Icon library
 - **Vite**: Build tool
 
-### AI
-- **Groq API**: LLM inference (LLaMA 3.3 70B Versatile)
+### AI (Multi-provider, BYOK)
+- **Groq API**: LLaMA 3.3 70B (fastest)
+- **Mistral API**: Mistral Large
+- **Google Gemini API**: Gemini 2.5 Flash
+- **Ollama**: Local LLM (LLaMA 3.2 3B)
 - AI calls happen client-side in Tauri, not in the backend
 
 ### Backend API
 - **Python 3.11+**: Backend language
 - **FastAPI**: Modern API framework
-- **PostgreSQL**: Database (Railway managed)
+- **SQLite**: Database (lightweight, file-based)
 - **SQLAlchemy**: ORM
-- **Railway.app**: Hosting platform
+- **Oracle Cloud**: Hosting (Always Free tier VPS)
 
 ## Project Structure
 
@@ -53,8 +56,8 @@ rewrit/
 │   │   ├── main.rs              # Entry point, global shortcuts, system tray
 │   │   ├── device_id.rs         # Device ID generation/storage
 │   │   ├── api_client.rs        # Backend API communication
-│   │   ├── groq_client.rs       # Groq AI API client
-│   │   └── double_tap.rs        # Double-tap Ctrl detection (rdev)
+│   │   ├── llm_client.rs        # Multi-provider LLM client (Groq, Mistral, Gemini, Ollama)
+│   │   └── config.rs            # Delay configuration and constants
 │   ├── Cargo.toml
 │   └── tauri.conf.json
 │

@@ -13,8 +13,7 @@ class Config:
     # Database
     DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///rewrit.db")
 
-    # API Keys
-    # ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")  # Removed - now using Groq in frontend
+    # API Keys (LLM calls are handled client-side via BYOK)
 
     # Environment
     ENVIRONMENT = os.getenv("ENVIRONMENT", "development")

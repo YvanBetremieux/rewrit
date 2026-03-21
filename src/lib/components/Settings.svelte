@@ -4,6 +4,7 @@
   import { quotaStore } from '../stores/quota.js';
   import { settingsStore } from '../stores/settings.js';
   import { showToast } from '../stores/toast.js';
+  import { getTimeUntilReset } from '../utils/time.js';
   import { Copy, Book, HelpCircle, Sparkles, RotateCcw, Key, Eye, EyeOff } from 'lucide-svelte';
 
   let quota = { used: 0, limit: 100, remaining: 100, resetsAt: null };
@@ -31,7 +32,6 @@
   let quickSelectShortcutInput = '';
   let isSavingQsShortcut = false;
   let shortcuts = [];
-  let recordingShortcut = null;
   let editingShortcut = null;
   let showShortcutHelp = false;
 
@@ -302,7 +302,6 @@
         showToast('Shortcut added', 'success', 2000);
       }
       editingShortcut = null;
-      recordingShortcut = null;
       await loadShortcuts();
     } catch (error) {
       showToast('Failed to save shortcut: ' + error, 'error', 3000);
@@ -336,19 +335,8 @@
     }
   }
 
-  function getTimeUntilReset() {
-    if (!quota?.resetsAt) return '';
-
-    const now = new Date();
-    const reset = new Date(quota.resetsAt);
-    const diff = reset - now;
-
-    if (diff <= 0) return '0h 0min';
-
-    const hours = Math.floor(diff / (1000 * 60 * 60));
-    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-
-    return `${hours}h ${minutes}min`;
+  function getTimeUntilResetLocal() {
+    return getTimeUntilReset(quota?.resetsAt);
   }
 
   function getQuotaPercentage() {
@@ -405,7 +393,7 @@
 
         {#if quota?.resetsAt}
           <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
-            Resets in {getTimeUntilReset()}
+            Resets in {getTimeUntilResetLocal()}
           </p>
         {/if}
 
@@ -787,7 +775,7 @@
                   Save
                 </button>
                 <button
-                  on:click={() => { editingShortcut = null; recordingShortcut = null; }}
+                  on:click={() => { editingShortcut = null; }}
                   class="flex-1 px-4 py-2 text-sm bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
                 >
                   Cancel
@@ -804,18 +792,20 @@
           <span>ℹ️</span> About
         </h2>
         <p class="text-sm text-gray-600 dark:text-gray-400 mb-3">
-          rewrit v1.0.0 — AI-powered instant text transformation.
+          rewrit v1.1.0 — AI-powered instant text transformation.
         </p>
         <div class="flex items-center gap-4 text-sm">
           <a
-            href="#"
+            href="https://github.com/YvanBetremieux/rewrit"
+            target="_blank"
             class="flex items-center gap-1 text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
           >
             <Book size={14} />
-            Docs
+            GitHub
           </a>
           <a
-            href="#"
+            href="https://github.com/YvanBetremieux/rewrit/issues"
+            target="_blank"
             class="flex items-center gap-1 text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
           >
             <HelpCircle size={14} />

@@ -11,6 +11,8 @@ export default defineConfig({
         main: resolve(__dirname, 'index.html'),
         preview: resolve(__dirname, 'src/preview.html'),
         quickselect: resolve(__dirname, 'src/quickselect.html'),
+        progress: resolve(__dirname, 'src/progress.html'),
+        loader: resolve(__dirname, 'src/loader.html'),
       },
     },
   },

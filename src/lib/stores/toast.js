@@ -7,7 +7,11 @@ export const toastStore = writable({
   duration: 3000
 });
 
+let toastTimer = null;
+
 export function showToast(message, type = 'info', duration = 3000) {
+  if (toastTimer) clearTimeout(toastTimer);
+
   toastStore.set({
     visible: true,
     message,
@@ -15,8 +19,9 @@ export function showToast(message, type = 'info', duration = 3000) {
     duration
   });
 
-  setTimeout(() => {
+  toastTimer = setTimeout(() => {
     hideToast();
+    toastTimer = null;
   }, duration);
 }
 

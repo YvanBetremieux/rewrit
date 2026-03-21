@@ -161,8 +161,9 @@ impl LlmClient {
         } else {
             "****".to_string()
         };
-        println!("[rewrit] LLM request: provider={}, model={}, url={}, key={}", provider_name, self.model, api_url, masked_key);
-        println!("[rewrit] LLM request: text={} chars, prompt='{}'", text.len(), &user_prompt[..user_prompt.len().min(80)]);
+        println!("[rewrit] LLM request: provider={}, model={}", provider_name, self.model);
+        #[cfg(debug_assertions)]
+        println!("[rewrit] LLM debug: url={}, key={}, text={} chars", api_url, masked_key, text.len());
 
         // Send request (Ollama uses a different format)
         let response = if matches!(self.provider, LlmProvider::Ollama) {

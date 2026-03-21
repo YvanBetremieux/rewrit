@@ -41,7 +41,7 @@ yarn-error.log*
 
 # Tauri
 src-tauri/target/
-src-tauri/Cargo.lock
+# Cargo.lock is committed (binary app, not a library)
 
 # Python
 *.pyc

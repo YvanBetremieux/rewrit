@@ -8,6 +8,7 @@
   import { quotaStore, updateQuota } from './lib/stores/quota.js';
   import { setDeviceId } from './lib/stores/settings.js';
   import { showToast } from './lib/stores/toast.js';
+  import { getTimeUntilReset } from './lib/utils/time.js';
 
   let showQuotaModal = false;
   let isLoading = true;
@@ -66,20 +67,7 @@
     }
   });
 
-  function getTimeUntilReset(resetsAt) {
-    if (!resetsAt) return '';
 
-    const now = new Date();
-    const reset = new Date(resetsAt);
-    const diff = reset - now;
-
-    if (diff <= 0) return '0h 0min';
-
-    const hours = Math.floor(diff / (1000 * 60 * 60));
-    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-
-    return `${hours}h ${minutes}min`;
-  }
 </script>
 
 <main class="min-h-screen">

@@ -81,9 +81,11 @@ fn macos_keystroke(app: &AppHandle, key: &str) {
 fn refocus_previous_app(app: &AppHandle, app_name: &str) {
     use tauri_plugin_shell::ShellExt;
     println!("[rewrit] refocusing: {}", app_name);
+    // Sanitize app_name to prevent AppleScript injection
+    let safe_name = app_name.replace('\\', "\\\\").replace('"', "\\\"");
     let script = format!(
         r#"tell application "System Events" to set frontmost of process "{}" to true"#,
-        app_name
+        safe_name
     );
     let output = app.shell().command("osascript").args(["-e", &script]).output();
     if let Ok(result) = tauri::async_runtime::block_on(output) {
@@ -1419,7 +1421,7 @@ pub fn run() {
     dotenv::dotenv().ok();
 
     let device_id = device_id::get_device_id().expect("Failed to get device ID");
-    println!("Device ID: {}", device_id);
+    println!("[rewrit] Device ID: {}...{}", &device_id[..8], &device_id[device_id.len()-4..]);
 
     let api_client = ApiClient::new(device_id.clone());
 

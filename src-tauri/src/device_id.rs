@@ -8,9 +8,26 @@ pub fn get_config_dir() -> PathBuf {
 
     if !config_dir.exists() {
         fs::create_dir_all(&config_dir).expect("Could not create config directory");
+        // Restrict directory permissions to owner only (Unix)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&config_dir, fs::Permissions::from_mode(0o700));
+        }
     }
 
     config_dir
+}
+
+/// Write a file with restricted permissions (0600 on Unix)
+fn write_private(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
+    fs::write(path, contents)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
 }
 
 pub fn get_device_id() -> Result<String, String> {
@@ -32,14 +49,22 @@ pub fn get_device_id() -> Result<String, String> {
     // Generate new device ID
     let new_id = Uuid::new_v4().to_string();
 
-    // Save to file
-    match fs::write(&device_id_path, &new_id) {
+    // Save to file with restricted permissions
+    match write_private(&device_id_path, &new_id) {
         Ok(_) => Ok(new_id),
         Err(e) => Err(format!("Failed to save device ID: {}", e)),
     }
 }
 
+fn validate_provider(provider: &str) -> Result<(), String> {
+    if provider.contains('/') || provider.contains('\\') || provider.contains("..") {
+        return Err(format!("Invalid provider name: {}", provider));
+    }
+    Ok(())
+}
+
 pub fn get_api_key(provider: &str) -> Option<String> {
+    if validate_provider(provider).is_err() { return None; }
     let filename = format!("{}_api_key", provider);
     let path = get_config_dir().join(filename);
     if path.exists() {
@@ -54,13 +79,15 @@ pub fn get_api_key(provider: &str) -> Option<String> {
 }
 
 pub fn set_api_key(provider: &str, key: &str) -> Result<(), String> {
+    validate_provider(provider)?;
     let filename = format!("{}_api_key", provider);
     let path = get_config_dir().join(filename);
-    fs::write(&path, key.trim())
+    write_private(&path, key.trim())
         .map_err(|e| format!("Failed to save API key: {}", e))
 }
 
 pub fn clear_api_key(provider: &str) -> Result<(), String> {
+    validate_provider(provider)?;
     let filename = format!("{}_api_key", provider);
     let path = get_config_dir().join(filename);
     if path.exists() {

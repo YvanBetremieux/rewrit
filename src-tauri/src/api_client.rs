@@ -62,7 +62,7 @@ impl ApiClient {
         let url = format!("{}/register", self.base_url);
         let request = RegisterRequest {
             platform,
-            app_version: "1.0.0".to_string(),
+            app_version: env!("CARGO_PKG_VERSION").to_string(),
         };
 
         match self
