@@ -15,7 +15,9 @@ import uuid as uuid_lib
 # Create tables
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="rewrit API", version="1.0.0")
+_docs_url = "/docs" if Config.ENVIRONMENT == "development" else None
+_redoc_url = "/redoc" if Config.ENVIRONMENT == "development" else None
+app = FastAPI(title="rewrit API", version="1.0.0", docs_url=_docs_url, redoc_url=_redoc_url)
 
 # CORS middleware
 app.add_middleware(
