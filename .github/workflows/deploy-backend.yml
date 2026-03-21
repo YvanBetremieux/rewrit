@@ -1,0 +1,39 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ubuntu
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd /home/ubuntu/rewrit-backend
+            # Backup current files
+            cp main.py main.py.bak 2>/dev/null || true
+            # Pull latest backend files
+            cd /tmp
+            rm -rf rewrit-deploy
+            git clone --depth 1 --filter=blob:none --sparse https://${{ secrets.GH_PAT }}@github.com/YvanBetremieux/rewrit.git rewrit-deploy
+            cd rewrit-deploy
+            git sparse-checkout set backend
+            # Copy files
+            cp backend/main.py backend/config.py backend/database.py backend/models.py backend/requirements.txt /home/ubuntu/rewrit-backend/
+            # Install deps + restart
+            cd /home/ubuntu/rewrit-backend
+            source venv/bin/activate
+            pip install -q -r requirements.txt
+            sudo systemctl restart rewrit
+            # Cleanup
+            rm -rf /tmp/rewrit-deploy
