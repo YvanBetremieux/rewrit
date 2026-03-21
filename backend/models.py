@@ -1,5 +1,4 @@
 from sqlalchemy import Boolean, Column, Integer, String, DateTime, Date, ForeignKey, Text, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from database import Base
@@ -10,7 +9,7 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    device_id = Column(UUID(as_uuid=True), unique=True, nullable=False, default=uuid.uuid4)
+    device_id = Column(String(36), unique=True, nullable=False, default=lambda: str(uuid.uuid4()))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_seen_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     total_actions_count = Column(Integer, default=0)

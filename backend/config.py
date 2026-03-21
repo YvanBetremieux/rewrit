@@ -11,7 +11,7 @@ class Config:
     """Application configuration"""
 
     # Database
-    DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://localhost/rewrit")
+    DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///rewrit.db")
 
     # API Keys
     # ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")  # Removed - now using Groq in frontend
