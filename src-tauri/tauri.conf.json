@@ -22,7 +22,7 @@
     "macOS": {
       "minimumSystemVersion": "10.13"
     },
-    "createUpdaterArtifacts": "v2Compatible"
+    "createUpdaterArtifacts": true
   },
   "app": {
     "macOSPrivateApi": true
