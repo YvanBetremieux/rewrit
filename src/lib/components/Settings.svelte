@@ -792,7 +792,7 @@
           <span>ℹ️</span> About
         </h2>
         <p class="text-sm text-gray-600 dark:text-gray-400 mb-3">
-          rewrit v1.2.1 — AI-powered instant text transformation.
+          rewrit v1.2.2 — AI-powered instant text transformation.
         </p>
         <div class="flex items-center gap-4 text-sm">
           <a
