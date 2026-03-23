@@ -49,8 +49,13 @@ pub struct ApiClient {
 
 impl ApiClient {
     pub fn new(device_id: String) -> Self {
-        let base_url = std::env::var("REWRIT_API_URL")
-            .unwrap_or_else(|_| "http://localhost:8000/api/v1".to_string());
+        let base_url = std::env::var("REWRIT_API_URL").unwrap_or_else(|_| {
+            if cfg!(debug_assertions) {
+                "http://localhost:8000/api/v1".to_string()
+            } else {
+                "http://141.253.99.48/api/v1".to_string()
+            }
+        });
         Self {
             client: reqwest::Client::new(),
             device_id,
