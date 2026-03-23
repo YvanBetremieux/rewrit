@@ -21,9 +21,18 @@
     ],
     "macOS": {
       "minimumSystemVersion": "10.13"
-    }
+    },
+    "createUpdaterArtifacts": "v2Compatible"
   },
   "app": {
     "macOSPrivateApi": true
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/YvanBetremieux/rewrit/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI0QjRGRjIxMTk2OUM0RjAKUldUd3hHa1pJZiswdEJqVGJkVTBKV04vYXdHM1V6SW9lWTZDcUNZUEQ1T1VFMFdzdkpxQkdDamcK"
+    }
   }
 }

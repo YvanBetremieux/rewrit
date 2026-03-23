@@ -67,6 +67,11 @@ build/
 _bmad/
 _bmad-output/
 
+# Signing keys
+*.key
+*.key.pub
+*.pem
+
 # Benchmark & test files
 benchmark.py
 benchmark.sh

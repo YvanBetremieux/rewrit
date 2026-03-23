@@ -1450,6 +1450,7 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![
             get_device_id,
@@ -1487,6 +1488,28 @@ pub fn run() {
             {
                 app.set_activation_policy(tauri::ActivationPolicy::Regular);
             }
+
+            // Auto-update check (non-blocking, silent in background)
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                match tauri_plugin_updater::UpdaterExt::updater(&handle) {
+                    Ok(updater) => {
+                        match updater.check().await {
+                            Ok(Some(update)) => {
+                                println!("[rewrit] Update available: v{}", update.version);
+                                if let Err(e) = update.download_and_install(|_, _| {}, || {}).await {
+                                    eprintln!("[rewrit] Update install failed: {}", e);
+                                } else {
+                                    println!("[rewrit] Update installed, will apply on next restart");
+                                }
+                            }
+                            Ok(None) => println!("[rewrit] App is up to date"),
+                            Err(e) => eprintln!("[rewrit] Update check failed: {}", e),
+                        }
+                    }
+                    Err(e) => eprintln!("[rewrit] Updater init failed: {}", e),
+                }
+            });
 
             // Pre-warm osascript to avoid cold start delay on first shortcut use
             #[cfg(target_os = "macos")]
