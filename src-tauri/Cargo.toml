@@ -1,6 +1,6 @@
 [package]
 name = "rewrit"
-version = "1.2.0"
+version = "1.2.1"
 description = "AI-powered text transformation at your fingertips"
 authors = ["Yvan"]
 license = ""
