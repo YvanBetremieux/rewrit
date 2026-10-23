@@ -73,9 +73,50 @@ fn macos_keystroke(app: &AppHandle, key: &str) {
     let output = app.shell().command("osascript").args(["-e", &script]).output();
     if let Ok(result) = tauri::async_runtime::block_on(output) {
         if !result.stderr.is_empty() {
-            log::error!("[rewrit] keystroke error: {}", String::from_utf8_lossy(&result.stderr));
+            let stderr = String::from_utf8_lossy(&result.stderr);
+            log::error!("[rewrit] keystroke error: {}", stderr);
+            if is_accessibility_error(&stderr) {
+                report_accessibility_missing(app);
+            }
         }
     }
+}
+
+/// osascript errors raised when rewrit is not allowed to control the keyboard
+#[cfg(target_os = "macos")]
+fn is_accessibility_error(stderr: &str) -> bool {
+    ["(1002)", "(-1719)", "(-25211)"].iter().any(|code| stderr.contains(code))
+}
+
+#[cfg(target_os = "macos")]
+static ACCESSIBILITY_DIALOG_OPEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Explain the missing Accessibility permission (macOS drops it after each unsigned update)
+#[cfg(target_os = "macos")]
+fn report_accessibility_missing(app: &AppHandle) {
+    use std::sync::atomic::Ordering;
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    if ACCESSIBILITY_DIALOG_OPEN.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    app.dialog()
+        .message(
+            "rewrit is not allowed to copy and paste for you.\n\n\
+             In System Settings › Privacy & Security › Accessibility, remove rewrit with \"–\", \
+             add it again and turn it on, then restart rewrit.\n\n\
+             macOS often drops this permission after an update.",
+        )
+        .title("Accessibility permission needed")
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom("Open Accessibility Settings".into(), "Later".into()))
+        .show(|open| {
+            ACCESSIBILITY_DIALOG_OPEN.store(false, Ordering::SeqCst);
+            if open {
+                let _ = std::process::Command::new("open")
+                    .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+                    .spawn();
+            }
+        });
 }
 
 #[cfg(target_os = "macos")]
@@ -231,12 +272,14 @@ fn retry_translation(state: State<'_, AppState>, app: AppHandle) -> Result<(), S
                         }
                     }
                 }
-                _ => {
-                    if let Some(window) = app.get_webview_window("preview") {
-                        let _ = window.hide();
-                    }
+                Ok(response) => {
+                    let err = response.error.unwrap_or_else(|| "Translation failed".to_string());
+                    report_llm_error(&app, &err);
                 }
+                Err(e) => report_llm_error(&app, &e),
             }
+        } else {
+            report_llm_error(&app, &missing_key_message());
         }
     });
 
@@ -444,18 +487,12 @@ fn execute_quick_select(
                     }
                     Ok(response) => {
                         let err = response.error.unwrap_or_else(|| "Translation failed".to_string());
-                        let _ = app_clone.emit("translation-error", serde_json::json!({"error": err}));
-                        if let Some(w) = app_clone.get_webview_window("preview") {
-                            let _ = w.hide();
-                        }
+                        report_llm_error(&app_clone, &err);
                     }
-                    Err(e) => {
-                        let _ = app_clone.emit("translation-error", serde_json::json!({"error": e}));
-                        if let Some(w) = app_clone.get_webview_window("preview") {
-                            let _ = w.hide();
-                        }
-                    }
+                    Err(e) => report_llm_error(&app_clone, &e),
                 }
+            } else {
+                report_llm_error(&app_clone, &missing_key_message());
             }
             *state.is_processing.lock().unwrap() = false;
         });
@@ -518,12 +555,14 @@ fn execute_quick_select(
                             report_usage_to_backend(&state, &app_clone).await;
                         }
                     }
-                    Ok(_) | Err(_) => {
-                        finish_progress(&app_clone, Some("Translation failed".to_string()));
-                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                        hide_progress(&app_clone);
+                    Ok(response) => {
+                        let err = response.error.unwrap_or_else(|| "Translation failed".to_string());
+                        report_llm_error(&app_clone, &err);
                     }
+                    Err(e) => report_llm_error(&app_clone, &e),
                 }
+            } else {
+                report_llm_error(&app_clone, &missing_key_message());
             }
             *state.is_processing.lock().unwrap() = false;
         });
@@ -924,6 +963,61 @@ async fn init_app(state: State<'_, AppState>) -> Result<(), String> {
     }
 }
 
+// --- Error reporting ---
+
+fn open_settings(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+        return;
+    }
+    use tauri::WebviewWindowBuilder;
+    let url = if cfg!(debug_assertions) {
+        let dev_url = std::env::var("TAURI_DEV_URL")
+            .unwrap_or_else(|_| "http://localhost:5173".to_string());
+        tauri::WebviewUrl::External(dev_url.parse().unwrap())
+    } else {
+        tauri::WebviewUrl::App("index.html".into())
+    };
+    if let Ok(w) = WebviewWindowBuilder::new(app, "main", url)
+        .title("rewrit - Settings")
+        .inner_size(800.0, 600.0)
+        .center()
+        .build()
+    {
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+}
+
+fn missing_key_message() -> String {
+    let provider = LlmProvider::from_str(&device_id::get_llm_provider());
+    format!("No API key configured for {}. Add one in Settings › AI Provider.", provider.display_name())
+}
+
+/// Log an AI error, close the preview/progress windows and tell the user what happened.
+fn report_llm_error(app: &AppHandle, error: &str) {
+    log::error!("[rewrit] transformation failed: {}", error);
+    let _ = app.emit("translation-error", serde_json::json!({"error": error}));
+    if let Some(w) = app.get_webview_window("preview") {
+        let _ = w.hide();
+    }
+    hide_progress(app);
+
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    let handle = app.clone();
+    app.dialog()
+        .message(format!("{}\n\nError logs: Settings › Diagnostics › Copy error logs.", error))
+        .title("rewrit could not transform your text")
+        .kind(MessageDialogKind::Error)
+        .buttons(MessageDialogButtons::OkCancelCustom("Open Settings".into(), "OK".into()))
+        .show(move |open| {
+            if open {
+                open_settings(&handle);
+            }
+        });
+}
+
 // --- Diagnostics ---
 
 #[derive(Debug, Clone, Serialize)]
@@ -986,6 +1080,73 @@ fn open_log_dir(app: AppHandle) -> Result<(), String> {
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let opener = if cfg!(target_os = "macos") { "open" } else if cfg!(target_os = "windows") { "explorer" } else { "xdg-open" };
     std::process::Command::new(opener).arg(&dir).spawn().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Last lines of errors.log, to paste in a bug report
+#[tauri::command]
+fn get_error_logs(app: AppHandle) -> Result<String, String> {
+    const MAX_LINES: usize = 50;
+    let path = app.path().app_log_dir().map_err(|e| e.to_string())?.join("errors.log");
+    let content = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(String::new()),
+        Err(e) => return Err(format!("Failed to read {}: {}", path.display(), e)),
+    };
+    let lines: Vec<&str> = content.lines().collect();
+    Ok(lines[lines.len().saturating_sub(MAX_LINES)..].join("\n"))
+}
+
+// --- Model selection ---
+
+fn resolve_api_key(provider: &LlmProvider) -> Option<String> {
+    device_id::get_api_key(provider.as_str()).or_else(|| {
+        let env_var = format!("{}_API_KEY", provider.as_str().to_uppercase());
+        std::env::var(&env_var).ok().filter(|k| !k.is_empty())
+    })
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ModelSetting {
+    model: String,
+    default_model: String,
+}
+
+#[tauri::command]
+fn get_model(provider: String) -> ModelSetting {
+    let provider = LlmProvider::from_str(&provider);
+    let default_model = provider.default_model().to_string();
+    ModelSetting {
+        model: device_id::get_model(provider.as_str()).unwrap_or_else(|| default_model.clone()),
+        default_model,
+    }
+}
+
+#[tauri::command]
+async fn list_models(provider: String) -> Result<Vec<String>, String> {
+    let provider = LlmProvider::from_str(&provider);
+    let key = if provider.requires_api_key() {
+        resolve_api_key(&provider)
+            .ok_or_else(|| format!("Add a {} API key first", provider.display_name()))?
+    } else {
+        String::new()
+    };
+    llm_client::list_models(&provider, &key).await
+}
+
+#[tauri::command]
+fn set_model(provider: String, model: String, state: State<'_, AppState>) -> Result<(), String> {
+    let provider = LlmProvider::from_str(&provider);
+    device_id::set_model(provider.as_str(), &model)?;
+    log::info!("[rewrit] {} model set to {}", provider.display_name(), if model.is_empty() { "default" } else { &model });
+
+    // Rebuild the client if this is the active provider
+    if LlmProvider::from_str(&device_id::get_llm_provider()) == provider {
+        let key = if provider.requires_api_key() { resolve_api_key(&provider) } else { Some(String::new()) };
+        if let Some(key) = key {
+            *state.llm_client.lock().unwrap() = Some(LlmClient::new(provider, key));
+        }
+    }
     Ok(())
 }
 
@@ -1400,18 +1561,12 @@ fn handle_global_shortcut(app_handle: &AppHandle, shortcut_str: &str) {
                     }
                     Ok(response) => {
                         let err = response.error.unwrap_or_else(|| "Translation failed".to_string());
-                        let _ = app_clone.emit("translation-error", serde_json::json!({"error": err}));
-                        if let Some(w) = app_clone.get_webview_window("preview") {
-                            let _ = w.hide();
-                        }
+                        report_llm_error(&app_clone, &err);
                     }
-                    Err(e) => {
-                        let _ = app_clone.emit("translation-error", serde_json::json!({"error": e}));
-                        if let Some(w) = app_clone.get_webview_window("preview") {
-                            let _ = w.hide();
-                        }
-                    }
+                    Err(e) => report_llm_error(&app_clone, &e),
                 }
+            } else {
+                report_llm_error(&app_clone, &missing_key_message());
             }
             *state.is_processing.lock().unwrap() = false;
         });
@@ -1461,12 +1616,14 @@ fn handle_global_shortcut(app_handle: &AppHandle, shortcut_str: &str) {
                             report_usage_to_backend(&state, &app_clone).await;
                         }
                     }
-                    Ok(_) | Err(_) => {
-                        finish_progress(&app_clone, Some("Translation failed".to_string()));
-                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                        hide_progress(&app_clone);
+                    Ok(response) => {
+                        let err = response.error.unwrap_or_else(|| "Translation failed".to_string());
+                        report_llm_error(&app_clone, &err);
                     }
+                    Err(e) => report_llm_error(&app_clone, &e),
                 }
+            } else {
+                report_llm_error(&app_clone, &missing_key_message());
             }
             *state.is_processing.lock().unwrap() = false;
         });
@@ -1513,7 +1670,7 @@ pub fn run() {
     };
 
     tauri::Builder::default()
-        // Logs go to stdout and to <log dir>/rewrit.log (see open_log_dir)
+        // Logs go to stdout, <log dir>/rewrit.log and errors only to <log dir>/errors.log
         .plugin(
             tauri_plugin_log::Builder::new()
                 .targets([
@@ -1521,6 +1678,11 @@ pub fn run() {
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
                         file_name: Some("rewrit".to_string()),
                     }),
+                    // Errors only, for "Copy error logs" in Settings
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                        file_name: Some("errors".to_string()),
+                    })
+                    .filter(|metadata| metadata.level() <= log::Level::Error),
                 ])
                 .level(log::LevelFilter::Info)
                 .max_file_size(2_000_000)
@@ -1565,6 +1727,10 @@ pub fn run() {
             get_diagnostics,
             test_llm_connection,
             open_log_dir,
+            get_error_logs,
+            get_model,
+            list_models,
+            set_model,
             updater::get_update_settings,
             updater::set_update_auto_check,
             updater::set_update_auto_install,
@@ -1653,30 +1819,7 @@ pub fn run() {
                 .on_menu_event(move |app, event| {
                     match event.id.as_ref() {
                         "quit" => app.exit(0),
-                        "settings" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                            } else {
-                                use tauri::WebviewWindowBuilder;
-                                let url = if cfg!(debug_assertions) {
-                                    let dev_url = std::env::var("TAURI_DEV_URL")
-                                        .unwrap_or_else(|_| "http://localhost:5173".to_string());
-                                    tauri::WebviewUrl::External(dev_url.parse().unwrap())
-                                } else {
-                                    tauri::WebviewUrl::App("index.html".into())
-                                };
-                                if let Ok(w) = WebviewWindowBuilder::new(app, "main", url)
-                                    .title("rewrit - Settings")
-                                    .inner_size(800.0, 600.0)
-                                    .center()
-                                    .build()
-                                {
-                                    let _ = w.show();
-                                    let _ = w.set_focus();
-                                }
-                            }
-                        }
+                        "settings" => open_settings(app),
                         _ => {}
                     }
                 })
@@ -1875,4 +2018,16 @@ pub fn run() {
 
 fn main() {
     run();
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::is_accessibility_error;
+
+    #[test]
+    fn detects_keystroke_permission_errors() {
+        assert!(is_accessibility_error("36:68: execution error: Erreur dans System Events : osascript n’est pas autorisé à envoyer de saisies. (1002)"));
+        assert!(is_accessibility_error("System Events got an error: rewrit is not allowed assistive access. (-25211)"));
+        assert!(!is_accessibility_error("execution error: Can’t get process \"Foo\". (-1728)"));
+    }
 }

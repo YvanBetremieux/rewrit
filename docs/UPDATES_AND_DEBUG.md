@@ -21,7 +21,16 @@ Les versions antérieures à 1.3.0 n'embarquent pas ce mécanisme : il faut inst
 
 Le repo doit rester **public** : l'app télécharge `latest.json` et les binaires sans authentification.
 
-### Clé de signature
+### Signature macOS (autorisations conservées)
+
+macOS rattache l'autorisation Accessibilité à la signature de l'app. Depuis la 1.3.1, l'app est signée avec une identité auto-signée stable, « rewrit Self-Signed » (valable jusqu'en 2036). Chaque mise à jour garde donc l'autorisation. Avec les builds non signés d'avant, macOS la retirait à chaque version.
+
+- Certificat : `~/.tauri/rewrit-signing.p12`, mot de passe dans le trousseau (`security find-generic-password -a rewrit -s rewrit-signing-p12-password -w`), déjà importé et marqué fiable dans le trousseau de session.
+- Secrets GitHub : `CERT_P12_BASE64` et `CERT_P12_PASSWORD`. La CI l'importe dans un trousseau temporaire, le marque fiable puis vérifie `Authority=rewrit Self-Signed`.
+- Ne jamais régénérer ce certificat : changer d'identité fait perdre l'autorisation à tous les utilisateurs.
+- Build signé en local : ajouter `export APPLE_SIGNING_IDENTITY="rewrit Self-Signed"` aux variables ci-dessous.
+
+### Clé de signature des mises à jour
 
 - Clé privée : `~/.tauri/rewrit.key` (jamais commitée).
 - Mot de passe : trousseau macOS, `security find-generic-password -a rewrit -s rewrit-tauri-signing-password -w`.
@@ -45,14 +54,25 @@ npm run tauri build -- --bundles app   # doit produire rewrit.app.tar.gz.sig
 - **Test AI connection** : envoie un petit prompt au fournisseur actif et affiche la réponse ou l'erreur brute de l'API (clé invalide, modèle retiré, quota…).
 - **Open logs** : ouvre le dossier des logs.
 - **Copy diagnostics** : copie version, OS, fournisseur, modèle, dossier de logs, dernière vérification de mise à jour et résultat du test.
+- **Copy error logs** : copie les 50 dernières lignes de `errors.log`, à coller tel quel dans une demande d'aide.
+
+### Messages d'erreur
+
+Quand une transformation échoue, une boîte de dialogue explique pourquoi (clé refusée, modèle retiré, quota atteint, fournisseur en panne, pas de clé configurée), avec un bouton **Open Settings**. Si l'autorisation Accessibilité manque, une boîte dédiée propose d'ouvrir le bon panneau des Réglages Système.
+
+### Choix du modèle
+
+Réglages › AI Provider › **Model** : la liste vient directement du fournisseur (Groq, Mistral, Gemini) avec ta clé, sans les modèles audio, d'embedding ou de modération. Le choix est stocké dans `~/.rewrit/<fournisseur>_model`. Revenir au modèle marqué « (default) » supprime ce fichier. Si le modèle choisi est retiré, il apparaît « (unavailable) » en rouge.
 
 ### Fichier de logs
 
 | OS | Emplacement |
 |----|-------------|
-| macOS | `~/Library/Logs/com.rewrit.app/rewrit.log` |
-| Windows | `%LOCALAPPDATA%\com.rewrit.app\logs\rewrit.log` |
-| Linux | `~/.local/share/com.rewrit.app/logs/rewrit.log` |
+| macOS | `~/Library/Logs/com.rewrit.app/` |
+| Windows | `%LOCALAPPDATA%\com.rewrit.app\logs\` |
+| Linux | `~/.local/share/com.rewrit.app/logs/` |
+
+Deux fichiers : `rewrit.log` (tout) et `errors.log` (erreurs seulement).
 
 Suivre les logs en direct sur macOS :
 

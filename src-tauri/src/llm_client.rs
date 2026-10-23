@@ -135,7 +135,8 @@ const SYSTEM_PROMPT: &str = "You are a helpful text transformation assistant. Ap
 
 impl LlmClient {
     pub fn new(provider: LlmProvider, api_key: String) -> Self {
-        let model = provider.default_model().to_string();
+        let model = crate::device_id::get_model(provider.as_str())
+            .unwrap_or_else(|| provider.default_model().to_string());
         // Ollama needs longer timeout (local inference is slow)
         let timeout_secs = if matches!(provider, LlmProvider::Ollama) { 120 } else { 15 };
         let client = Arc::new(
@@ -228,7 +229,7 @@ impl LlmClient {
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
             log::error!("[rewrit] LLM error body: {}", body);
-            return Err(format!("{} API HTTP {}: {}", provider_name, status, body));
+            return Err(http_error_message(provider_name, &self.model, status.as_u16(), &body));
         }
 
         // Parse response (Ollama uses a different format)
@@ -347,7 +348,7 @@ impl LlmClient {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
             log::error!("[rewrit] LLM stream error: HTTP {} {}", status, body);
-            return Err(format!("{} API HTTP {}: {}", provider_name, status, body));
+            return Err(http_error_message(provider_name, &self.model, status.as_u16(), &body));
         }
 
         // Read the stream
@@ -425,6 +426,78 @@ impl LlmClient {
     }
 }
 
+/// Turn an HTTP error from a provider into a message the user can act on.
+fn http_error_message(provider_name: &str, model: &str, status: u16, body: &str) -> String {
+    let api_message = serde_json::from_str::<serde_json::Value>(body).ok().and_then(|v| {
+        v["error"]["message"].as_str()
+            .or_else(|| v["message"].as_str())
+            .or_else(|| v[0]["error"]["message"].as_str())
+            .map(|s| s.to_string())
+    });
+    let model_missing = body.contains("model_not_found")
+        || body.contains("does not exist")
+        || body.contains("Invalid model")
+        || (status == 404 && body.contains("model"));
+
+    if model_missing {
+        format!("{}: the model '{}' is not available anymore. Choose another model in Settings › AI Provider.", provider_name, model)
+    } else if status == 401 || status == 403 {
+        format!("{}: API key rejected (HTTP {}). Check your API key in Settings › AI Provider.", provider_name, status)
+    } else if status == 429 {
+        format!("{}: rate limit or quota reached. Wait a moment or switch provider.", provider_name)
+    } else if status >= 500 {
+        format!("{} is having trouble (HTTP {}). Try again in a moment.", provider_name, status)
+    } else {
+        let detail = api_message.unwrap_or_else(|| body.chars().take(200).collect());
+        format!("{} error (HTTP {}): {}", provider_name, status, detail)
+    }
+}
+
+/// Model lists include speech, moderation and embedding models: keep text generation ones.
+fn is_chat_model(id: &str) -> bool {
+    const EXCLUDED: [&str; 12] = [
+        "whisper", "tts", "orpheus", "guard", "safeguard", "embed",
+        "moderation", "ocr", "transcribe", "imagen", "veo", "aqa",
+    ];
+    let id = id.to_lowercase();
+    !EXCLUDED.iter().any(|x| id.contains(x))
+}
+
+/// List the chat models the API key can use, sorted by id.
+pub async fn list_models(provider: &LlmProvider, api_key: &str) -> Result<Vec<String>, String> {
+    let url = match provider {
+        LlmProvider::Groq => "https://api.groq.com/openai/v1/models",
+        LlmProvider::Mistral => "https://api.mistral.ai/v1/models",
+        LlmProvider::Gemini => "https://generativelanguage.googleapis.com/v1beta/openai/models",
+        LlmProvider::Ollama => return Ok(vec![provider.default_model().to_string()]),
+    };
+    let name = provider.display_name();
+    let response = reqwest::Client::new()
+        .get(url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|e| format!("Cannot reach {} to list models: {}", name, e))?;
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    if !status.is_success() {
+        log::error!("[rewrit] list models failed: HTTP {} {}", status, body);
+        return Err(http_error_message(name, "", status.as_u16(), &body));
+    }
+    let json: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|e| format!("Invalid model list from {}: {}", name, e))?;
+    let mut models: Vec<String> = json["data"].as_array().into_iter().flatten()
+        .filter_map(|m| m["id"].as_str())
+        // Gemini prefixes ids with "models/"
+        .map(|id| id.trim_start_matches("models/").to_string())
+        .filter(|id| is_chat_model(id))
+        .collect();
+    models.sort();
+    models.dedup();
+    Ok(models)
+}
+
 fn clean_response(response: &str) -> String {
     let mut cleaned = response.to_string();
 
@@ -445,4 +518,47 @@ fn clean_response(response: &str) -> String {
     }
 
     cleaned
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retired_model_says_to_pick_another() {
+        let body = r#"{"error":{"message":"The model `llama-3.3-70b-versatile` does not exist or you do not have access to it.","type":"invalid_request_error","code":"model_not_found"}}"#;
+        let msg = http_error_message("Groq", "llama-3.3-70b-versatile", 404, body);
+        assert!(msg.contains("llama-3.3-70b-versatile"), "{}", msg);
+        assert!(msg.contains("Choose another model"), "{}", msg);
+    }
+
+    #[test]
+    fn rejected_key_says_to_check_key() {
+        let msg = http_error_message("Mistral", "mistral-small-latest", 401, r#"{"message":"Unauthorized"}"#);
+        assert!(msg.contains("API key"), "{}", msg);
+    }
+
+    #[test]
+    fn rate_limit_is_explained() {
+        let msg = http_error_message("Groq", "m", 429, "");
+        assert!(msg.contains("rate limit"), "{}", msg);
+    }
+
+    #[test]
+    fn unknown_error_keeps_api_message() {
+        let body = r#"{"error":{"message":"context too long"}}"#;
+        let msg = http_error_message("Gemini", "m", 400, body);
+        assert!(msg.contains("context too long"), "{}", msg);
+        assert!(msg.contains("400"), "{}", msg);
+    }
+
+    #[test]
+    fn chat_model_filter_skips_audio_and_guard_models() {
+        assert!(is_chat_model("openai/gpt-oss-120b"));
+        assert!(is_chat_model("mistral-small-latest"));
+        assert!(!is_chat_model("whisper-large-v3"));
+        assert!(!is_chat_model("meta-llama/llama-prompt-guard-2-22m"));
+        assert!(!is_chat_model("mistral-embed"));
+        assert!(!is_chat_model("canopylabs/orpheus-v1-english"));
+    }
 }

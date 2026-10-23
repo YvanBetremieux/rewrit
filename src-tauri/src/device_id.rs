@@ -186,6 +186,28 @@ pub fn set_update_last_check(timestamp: &str) -> Result<(), String> {
         .map_err(|e| format!("Failed to save last update check: {}", e))
 }
 
+/// Model chosen for a provider, if the user picked one
+pub fn get_model(provider: &str) -> Option<String> {
+    if validate_provider(provider).is_err() { return None; }
+    fs::read_to_string(get_config_dir().join(format!("{}_model", provider)))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Save the model for a provider; an empty model restores the default
+pub fn set_model(provider: &str, model: &str) -> Result<(), String> {
+    validate_provider(provider)?;
+    let path = get_config_dir().join(format!("{}_model", provider));
+    if model.trim().is_empty() {
+        if path.exists() {
+            fs::remove_file(&path).map_err(|e| format!("Failed to reset model: {}", e))?;
+        }
+        return Ok(());
+    }
+    fs::write(&path, model.trim()).map_err(|e| format!("Failed to save model: {}", e))
+}
+
 pub fn get_quick_select_shortcut() -> String {
     let path = get_config_dir().join("quick_select_shortcut");
     if path.exists() {

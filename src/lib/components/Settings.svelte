@@ -6,7 +6,7 @@
   import { settingsStore } from '../stores/settings.js';
   import { showToast } from '../stores/toast.js';
   import { getTimeUntilReset } from '../utils/time.js';
-  import { Copy, Book, HelpCircle, Sparkles, RotateCcw, Key, Eye, EyeOff, Download, FolderOpen, Stethoscope } from 'lucide-svelte';
+  import { Copy, Book, HelpCircle, Sparkles, RotateCcw, Key, Eye, EyeOff, Download, FolderOpen, Stethoscope, ClipboardList } from 'lucide-svelte';
 
   let quota = { used: 0, limit: 100, remaining: 100, resetsAt: null };
   let settings = { deviceId: '', enabled: true, showNotifications: true };
@@ -23,6 +23,10 @@
     { id: 'gemini', name: 'Gemini', description: 'Gemini 2.5 Flash — Google', keyPrefix: '', keyUrl: 'https://aistudio.google.com/apikey', local: false },
     { id: 'ollama', name: 'Ollama', description: 'LLaMA 3.2 3B — Local/Offline', keyPrefix: '', keyUrl: '', local: true },
   ];
+  let modelSetting = { model: '', default_model: '' };
+  let availableModels = [];
+  let modelsError = '';
+  let isLoadingModels = false;
   let ollamaStatus = { installed: false, ollama_running: false };
   let isOllamaPulling = false;
   let isOllamaDeleting = false;
@@ -43,6 +47,7 @@
   let unlistenUpdate = null;
   let diagnostics = null;
   let connectionTest = null;
+  let errorLogCount = null;
   let isTestingConnection = false;
 
   // Check if we're in development mode
@@ -78,7 +83,46 @@
     } catch (error) {
       console.error('Failed to load API key:', error);
     }
+    await loadModels(provider);
   }
+
+  // Model selection (cloud providers)
+  async function loadModels(provider) {
+    availableModels = [];
+    modelsError = '';
+    try {
+      modelSetting = await invoke('get_model', { provider });
+    } catch (error) {
+      console.error('Failed to load model setting:', error);
+    }
+    if (!savedApiKey) return;
+    isLoadingModels = true;
+    try {
+      availableModels = await invoke('list_models', { provider });
+    } catch (error) {
+      modelsError = String(error);
+    } finally {
+      isLoadingModels = false;
+    }
+  }
+
+  async function changeModel(model) {
+    try {
+      // Saving the default clears the override so future default changes apply
+      await invoke('set_model', {
+        provider: selectedProvider,
+        model: model === modelSetting.default_model ? '' : model,
+      });
+      modelSetting = { ...modelSetting, model };
+      showToast(`Model set to ${model}`, 'success', 2000);
+      connectionTest = null;
+      loadDiagnostics();
+    } catch (error) {
+      showToast('Failed to save model: ' + error, 'error', 3000);
+    }
+  }
+
+  $: modelUnavailable = availableModels.length > 0 && !availableModels.includes(modelSetting.model);
 
   async function changeProvider(newProvider) {
     selectedProvider = newProvider;
@@ -104,6 +148,7 @@
       await invoke('set_api_key', { provider: selectedProvider, key: apiKeyInput.trim() });
       savedApiKey = apiKeyInput.trim();
       showToast(savedApiKey ? 'API key saved' : 'API key removed', 'success', 2000);
+      loadModels(selectedProvider);
     } catch (error) {
       showToast('Failed to save API key: ' + error, 'error', 3000);
     } finally {
@@ -361,6 +406,21 @@
       await invoke('open_log_dir');
     } catch (error) {
       showToast('Failed to open logs folder: ' + error, 'error', 3000);
+    }
+  }
+
+  async function copyErrorLogs() {
+    try {
+      const logs = await invoke('get_error_logs');
+      errorLogCount = logs ? logs.split('\n').length : 0;
+      if (!logs) {
+        showToast('No errors logged', 'success', 2000);
+        return;
+      }
+      await navigator.clipboard.writeText(logs);
+      showToast(`${errorLogCount} error lines copied to clipboard`, 'success', 2000);
+    } catch (error) {
+      showToast('Failed to read error logs: ' + error, 'error', 3000);
     }
   }
 
@@ -690,6 +750,43 @@
             <p class="mt-2 text-xs text-green-600 dark:text-green-400">Key configured</p>
           {:else}
             <p class="mt-2 text-xs text-yellow-600 dark:text-yellow-400">No key set — enter your API key to start</p>
+          {/if}
+
+          <!-- Model selector -->
+          {#if savedApiKey}
+            <div class="mt-4">
+              <div class="flex items-center justify-between mb-1">
+                <label for="model-select" class="text-xs text-gray-600 dark:text-gray-300">Model</label>
+                <button
+                  on:click={() => loadModels(selectedProvider)}
+                  disabled={isLoadingModels}
+                  class="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 disabled:opacity-50"
+                >
+                  {isLoadingModels ? 'Loading…' : 'Refresh list'}
+                </button>
+              </div>
+              <select
+                id="model-select"
+                value={modelSetting.model}
+                on:change={(e) => changeModel(e.target.value)}
+                disabled={isLoadingModels || availableModels.length === 0}
+                class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white font-mono disabled:opacity-60"
+              >
+                {#if availableModels.length === 0 || modelUnavailable}
+                  <option value={modelSetting.model}>{modelSetting.model}{modelUnavailable ? ' (unavailable)' : ''}</option>
+                {/if}
+                {#each availableModels as model}
+                  <option value={model}>{model}{model === modelSetting.default_model ? ' (default)' : ''}</option>
+                {/each}
+              </select>
+              {#if modelUnavailable}
+                <p class="mt-1 text-xs text-red-600 dark:text-red-400">
+                  This model is no longer offered by {providers.find(p => p.id === selectedProvider)?.name}. Pick another one.
+                </p>
+              {:else if modelsError}
+                <p class="mt-1 text-xs text-red-600 dark:text-red-400 break-words">{modelsError}</p>
+              {/if}
+            </div>
           {/if}
 
         <!-- Local: Ollama model management -->
@@ -1037,6 +1134,13 @@
           >
             <Copy size={14} />
             Copy diagnostics
+          </button>
+          <button
+            on:click={copyErrorLogs}
+            class="px-3 py-1.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors flex items-center gap-1.5"
+          >
+            <ClipboardList size={14} />
+            Copy error logs
           </button>
         </div>
       </section>

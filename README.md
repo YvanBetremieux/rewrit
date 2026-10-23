@@ -53,7 +53,7 @@ The app is not signed with an Apple Developer certificate. macOS will block it b
 xattr -cr /Applications/rewrit.app
 ```
 
-Then macOS will ask for **Accessibility permissions** — this is required to capture keyboard shortcuts and simulate copy/paste. Go to **System Settings > Privacy & Security > Accessibility** and enable rewrit.
+Then macOS will ask for **Accessibility permissions** — this is required to capture keyboard shortcuts and simulate copy/paste. Go to **System Settings > Privacy & Security > Accessibility** and enable rewrit. From 1.3.1 on, the app is signed with a stable identity, so updates keep this permission. If shortcuts stop working after updating from an older version, remove rewrit from the list with "–", add it again and restart it.
 
 ## Setup
 
@@ -171,6 +171,7 @@ All settings are stored in `~/.rewrit/`:
 | `device_id` | Anonymous device identifier |
 | `update_auto_check` / `update_auto_install` | Update preferences |
 | `update_last_check` | Last update check (RFC 3339) |
+| `<provider>_model` | Model chosen for a provider (absent = default) |
 
 ## Troubleshooting
 
