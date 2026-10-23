@@ -1,11 +1,12 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
+  import { listen } from '@tauri-apps/api/event';
   import { quotaStore } from '../stores/quota.js';
   import { settingsStore } from '../stores/settings.js';
   import { showToast } from '../stores/toast.js';
   import { getTimeUntilReset } from '../utils/time.js';
-  import { Copy, Book, HelpCircle, Sparkles, RotateCcw, Key, Eye, EyeOff } from 'lucide-svelte';
+  import { Copy, Book, HelpCircle, Sparkles, RotateCcw, Key, Eye, EyeOff, Download, FolderOpen, Stethoscope } from 'lucide-svelte';
 
   let quota = { used: 0, limit: 100, remaining: 100, resetsAt: null };
   let settings = { deviceId: '', enabled: true, showNotifications: true };
@@ -17,7 +18,7 @@
   let isSavingKey = false;
 
   const providers = [
-    { id: 'groq', name: 'Groq', description: 'LLaMA 3.3 70B — Ultra-fast', keyPrefix: 'gsk_', keyUrl: 'https://console.groq.com/keys', local: false },
+    { id: 'groq', name: 'Groq', description: 'GPT-OSS 120B — Ultra-fast', keyPrefix: 'gsk_', keyUrl: 'https://console.groq.com/keys', local: false },
     { id: 'mistral', name: 'Mistral', description: 'Mistral Small — EU/RGPD', keyPrefix: '', keyUrl: 'https://console.mistral.ai/api-keys', local: false },
     { id: 'gemini', name: 'Gemini', description: 'Gemini 2.5 Flash — Google', keyPrefix: '', keyUrl: 'https://aistudio.google.com/apikey', local: false },
     { id: 'ollama', name: 'Ollama', description: 'LLaMA 3.2 3B — Local/Offline', keyPrefix: '', keyUrl: '', local: true },
@@ -34,6 +35,15 @@
   let shortcuts = [];
   let editingShortcut = null;
   let showShortcutHelp = false;
+  let updateSettings = { current_version: '', auto_check: true, auto_install: true, last_check: null };
+  // idle | checking | up-to-date | available | installing | installed | error
+  let updateState = 'idle';
+  let availableVersion = null;
+  let updateError = '';
+  let unlistenUpdate = null;
+  let diagnostics = null;
+  let connectionTest = null;
+  let isTestingConnection = false;
 
   // Check if we're in development mode
   const isDevelopment = import.meta.env.DEV;
@@ -247,12 +257,125 @@
         loadStreamResponse(),
         loadQuickSelectShortcut(),
         loadQuickSelectEnabled(),
-        loadShortcuts()
+        loadShortcuts(),
+        loadUpdateSettings(),
+        loadDiagnostics()
       ]);
+      unlistenUpdate = await listen('update-status', (event) => {
+        updateState = event.payload;
+        loadUpdateSettings();
+      });
     } catch (error) {
       console.error('Error loading settings:', error);
     }
   });
+
+  onDestroy(() => unlistenUpdate?.());
+
+  // --- Updates ---
+
+  async function loadUpdateSettings() {
+    try {
+      updateSettings = await invoke('get_update_settings');
+    } catch (error) {
+      console.error('Failed to load update settings:', error);
+    }
+  }
+
+  async function toggleUpdateAutoCheck() {
+    const enabled = !updateSettings.auto_check;
+    try {
+      await invoke('set_update_auto_check', { enabled });
+      updateSettings = { ...updateSettings, auto_check: enabled };
+    } catch (error) {
+      showToast('Failed to save setting: ' + error, 'error', 3000);
+    }
+  }
+
+  async function toggleUpdateAutoInstall() {
+    const enabled = !updateSettings.auto_install;
+    try {
+      await invoke('set_update_auto_install', { enabled });
+      updateSettings = { ...updateSettings, auto_install: enabled };
+    } catch (error) {
+      showToast('Failed to save setting: ' + error, 'error', 3000);
+    }
+  }
+
+  async function checkForUpdate() {
+    updateState = 'checking';
+    updateError = '';
+    try {
+      const result = await invoke('check_for_update');
+      availableVersion = result.version;
+      updateState = result.available ? 'available' : 'up-to-date';
+    } catch (error) {
+      updateError = String(error);
+      updateState = 'error';
+    }
+    loadUpdateSettings();
+  }
+
+  async function installUpdate() {
+    updateState = 'installing';
+    updateError = '';
+    try {
+      // Restarts the app on success
+      await invoke('install_update');
+    } catch (error) {
+      updateError = String(error);
+      updateState = 'error';
+    }
+  }
+
+  function formatLastCheck(timestamp) {
+    if (!timestamp) return 'Never';
+    return new Date(timestamp).toLocaleString();
+  }
+
+  // --- Diagnostics ---
+
+  async function loadDiagnostics() {
+    try {
+      diagnostics = await invoke('get_diagnostics');
+    } catch (error) {
+      console.error('Failed to load diagnostics:', error);
+    }
+  }
+
+  async function testConnection() {
+    isTestingConnection = true;
+    connectionTest = null;
+    try {
+      connectionTest = await invoke('test_llm_connection');
+    } catch (error) {
+      connectionTest = { ok: false, duration_ms: 0, error: String(error) };
+    } finally {
+      isTestingConnection = false;
+      loadDiagnostics();
+    }
+  }
+
+  async function openLogs() {
+    try {
+      await invoke('open_log_dir');
+    } catch (error) {
+      showToast('Failed to open logs folder: ' + error, 'error', 3000);
+    }
+  }
+
+  function copyDiagnostics() {
+    const lines = [
+      ...Object.entries(diagnostics || {}).map(([k, v]) => `${k}: ${v ?? '-'}`),
+      `last_update_check: ${updateSettings.last_check ?? 'never'}`,
+    ];
+    if (connectionTest) {
+      lines.push(`connection_test: ${connectionTest.ok ? 'ok' : 'failed'} (${connectionTest.duration_ms} ms)`);
+      if (connectionTest.error) lines.push(`connection_error: ${connectionTest.error}`);
+    }
+    navigator.clipboard.writeText(lines.join('\n'));
+    showToast('Diagnostics copied to clipboard', 'success', 2000);
+  }
 
   const PROMPT_MAX_LENGTH = 500;
 
@@ -786,13 +909,145 @@
         {/if}
       </section>
 
+      <!-- Updates Section -->
+      <section class="bg-white dark:bg-gray-800 rounded-lg shadow p-5">
+        <h2 class="text-base font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+          <span>⬆️</span> Updates
+        </h2>
+
+        <div class="bg-gray-50 dark:bg-gray-700 rounded-lg p-3 mb-3">
+          <p class="text-sm text-gray-700 dark:text-gray-200">
+            Installed version: <span class="font-mono font-medium">v{updateSettings.current_version || '…'}</span>
+          </p>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            Last check: {formatLastCheck(updateSettings.last_check)}
+          </p>
+          {#if updateState === 'up-to-date'}
+            <p class="text-xs text-green-600 dark:text-green-400 mt-2">✓ rewrit is up to date</p>
+          {:else if updateState === 'available'}
+            <p class="text-xs text-blue-600 dark:text-blue-400 mt-2">
+              v{availableVersion || 'new'} is available
+            </p>
+          {:else if updateState === 'installed'}
+            <p class="text-xs text-green-600 dark:text-green-400 mt-2">Update installed — restart rewrit to use it</p>
+          {:else if updateState === 'error'}
+            <p class="text-xs text-red-600 dark:text-red-400 mt-2 break-words">{updateError}</p>
+          {/if}
+        </div>
+
+        <div class="flex gap-2">
+          <button
+            on:click={checkForUpdate}
+            disabled={updateState === 'checking' || updateState === 'installing'}
+            class="flex-1 px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {updateState === 'checking' ? 'Checking…' : 'Check for updates…'}
+          </button>
+          {#if updateState === 'available' || updateState === 'installing'}
+            <button
+              on:click={installUpdate}
+              disabled={updateState === 'installing'}
+              class="flex-1 px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Download size={14} />
+              {updateState === 'installing' ? 'Installing…' : 'Install & restart'}
+            </button>
+          {/if}
+        </div>
+
+        <div class="space-y-2 mt-4">
+          <label class="flex items-center justify-between cursor-pointer py-1">
+            <span class="text-sm text-gray-700 dark:text-gray-300">Check automatically</span>
+            <input
+              type="checkbox"
+              checked={updateSettings.auto_check}
+              on:change={toggleUpdateAutoCheck}
+              class="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
+            />
+          </label>
+          <label class="flex items-center justify-between cursor-pointer py-1">
+            <span class="text-sm text-gray-700 dark:text-gray-300">Install automatically</span>
+            <input
+              type="checkbox"
+              checked={updateSettings.auto_install}
+              on:change={toggleUpdateAutoInstall}
+              disabled={!updateSettings.auto_check}
+              class="w-5 h-5 text-blue-600 rounded focus:ring-blue-500 disabled:opacity-50"
+            />
+          </label>
+        </div>
+      </section>
+
+      <!-- Diagnostics Section -->
+      <section class="bg-white dark:bg-gray-800 rounded-lg shadow p-5">
+        <h2 class="text-base font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+          <span>🩺</span> Diagnostics
+        </h2>
+
+        {#if diagnostics}
+          <dl class="bg-gray-50 dark:bg-gray-700 rounded-lg p-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+            <dt class="text-gray-500 dark:text-gray-400">Provider</dt>
+            <dd class="text-gray-700 dark:text-gray-200">{diagnostics.provider}</dd>
+            <dt class="text-gray-500 dark:text-gray-400">Model</dt>
+            <dd class="text-gray-700 dark:text-gray-200 font-mono break-all">
+              {diagnostics.model ?? 'No API key configured'}
+            </dd>
+            <dt class="text-gray-500 dark:text-gray-400">System</dt>
+            <dd class="text-gray-700 dark:text-gray-200">{diagnostics.os} {diagnostics.arch}</dd>
+            <dt class="text-gray-500 dark:text-gray-400">Logs</dt>
+            <dd class="text-gray-700 dark:text-gray-200 font-mono break-all">{diagnostics.log_dir}</dd>
+          </dl>
+        {/if}
+
+        {#if connectionTest}
+          <div
+            class="mt-3 rounded-lg p-3 text-xs break-words"
+            class:bg-green-50={connectionTest.ok}
+            class:text-green-800={connectionTest.ok}
+            class:bg-red-50={!connectionTest.ok}
+            class:text-red-800={!connectionTest.ok}
+          >
+            {#if connectionTest.ok}
+              ✓ Connection OK ({connectionTest.duration_ms} ms) — “{connectionTest.output}”
+            {:else}
+              ✗ {connectionTest.error}
+            {/if}
+          </div>
+        {/if}
+
+        <div class="flex flex-wrap gap-2 mt-3">
+          <button
+            on:click={testConnection}
+            disabled={isTestingConnection}
+            class="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Stethoscope size={14} />
+            {isTestingConnection ? 'Testing…' : 'Test AI connection'}
+          </button>
+          <button
+            on:click={openLogs}
+            class="px-3 py-1.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors flex items-center gap-1.5"
+          >
+            <FolderOpen size={14} />
+            Open logs
+          </button>
+          <button
+            on:click={copyDiagnostics}
+            class="px-3 py-1.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors flex items-center gap-1.5"
+          >
+            <Copy size={14} />
+            Copy diagnostics
+          </button>
+        </div>
+      </section>
+
       <!-- About Section -->
       <section class="bg-white dark:bg-gray-800 rounded-lg shadow p-5">
         <h2 class="text-base font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
           <span>ℹ️</span> About
         </h2>
         <p class="text-sm text-gray-600 dark:text-gray-400 mb-3">
-          rewrit v1.2.2 — AI-powered instant text transformation.
+          rewrit v{updateSettings.current_version} — AI-powered instant text transformation.
         </p>
         <div class="flex items-center gap-4 text-sm">
           <a

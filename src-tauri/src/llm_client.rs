@@ -25,7 +25,7 @@ impl LlmProvider {
 
     pub fn default_model(&self) -> &str {
         match self {
-            LlmProvider::Groq => "llama-3.3-70b-versatile",
+            LlmProvider::Groq => "openai/gpt-oss-120b",
             LlmProvider::Mistral => "mistral-small-latest",
             LlmProvider::Gemini => "gemini-2.5-flash",
             LlmProvider::Ollama => "llama3.2:3b",
@@ -62,6 +62,14 @@ impl LlmProvider {
     pub fn requires_api_key(&self) -> bool {
         !matches!(self, LlmProvider::Ollama)
     }
+
+    /// Groq's default model is a reasoning model: keep reasoning short to stay fast.
+    fn reasoning_effort(&self) -> Option<&'static str> {
+        match self {
+            LlmProvider::Groq => Some("low"),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -84,6 +92,8 @@ struct ChatCompletionRequest {
     messages: Vec<ChatMessage>,
     temperature: f32,
     max_tokens: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_effort: Option<&'static str>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -137,6 +147,10 @@ impl LlmClient {
         Self { client, api_key, provider, model }
     }
 
+    pub fn model(&self) -> &str {
+        &self.model
+    }
+
     pub async fn execute_prompt(&self, text: String, user_prompt: String) -> Result<TranslateResponse, String> {
         let start_time = Instant::now();
         let provider_name = self.provider.display_name();
@@ -163,9 +177,9 @@ impl LlmClient {
         } else {
             "****".to_string()
         };
-        println!("[rewrit] LLM request: provider={}, model={}", provider_name, self.model);
+        log::info!("[rewrit] LLM request: provider={}, model={}", provider_name, self.model);
         #[cfg(debug_assertions)]
-        println!("[rewrit] LLM debug: url={}, key={}, text={} chars", api_url, masked_key, text.len());
+        log::info!("[rewrit] LLM debug: url={}, key={}, text={} chars", api_url, masked_key, text.len());
 
         // Send request (Ollama uses a different format)
         let response = if matches!(self.provider, LlmProvider::Ollama) {
@@ -185,6 +199,7 @@ impl LlmClient {
                 messages,
                 temperature: 0.3,
                 max_tokens: 2000,
+                reasoning_effort: self.provider.reasoning_effort(),
             };
             self.client.post(api_url)
                 .header("Content-Type", "application/json")
@@ -193,7 +208,7 @@ impl LlmClient {
                 .send()
                 .await
         }.map_err(|e| {
-            println!("[rewrit] LLM error (send): {}", e);
+            log::error!("[rewrit] LLM error (send): {}", e);
             if e.is_timeout() {
                 format!("{} timeout - the request took too long", provider_name)
             } else if e.is_connect() {
@@ -208,11 +223,11 @@ impl LlmClient {
         })?;
 
         let status = response.status();
-        println!("[rewrit] LLM response: HTTP {}", status);
+        log::info!("[rewrit] LLM response: HTTP {}", status);
 
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
-            println!("[rewrit] LLM error body: {}", body);
+            log::error!("[rewrit] LLM error body: {}", body);
             return Err(format!("{} API HTTP {}: {}", provider_name, status, body));
         }
 
@@ -281,7 +296,7 @@ impl LlmClient {
         ];
 
         let api_url = self.provider.api_url();
-        println!("[rewrit] LLM stream request: provider={}, model={}", provider_name, self.model);
+        log::info!("[rewrit] LLM stream request: provider={}, model={}", provider_name, self.model);
 
         let response = if matches!(self.provider, LlmProvider::Ollama) {
             // Ollama streaming
@@ -297,13 +312,16 @@ impl LlmClient {
                 .await
         } else {
             // OpenAI-compatible streaming
-            let body = serde_json::json!({
+            let mut body = serde_json::json!({
                 "model": self.model,
                 "messages": messages,
                 "temperature": 0.3,
                 "max_tokens": 2000,
                 "stream": true,
             });
+            if let Some(effort) = self.provider.reasoning_effort() {
+                body["reasoning_effort"] = effort.into();
+            }
             self.client.post(api_url)
                 .header("Content-Type", "application/json")
                 .header("Authorization", format!("Bearer {}", self.api_key))
@@ -311,6 +329,7 @@ impl LlmClient {
                 .send()
                 .await
         }.map_err(|e| {
+            log::error!("[rewrit] LLM stream error (send): {}", e);
             if e.is_timeout() {
                 format!("{} timeout", provider_name)
             } else if e.is_connect() {
@@ -327,6 +346,7 @@ impl LlmClient {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
+            log::error!("[rewrit] LLM stream error: HTTP {} {}", status, body);
             return Err(format!("{} API HTTP {}: {}", provider_name, status, body));
         }
 
@@ -385,7 +405,7 @@ impl LlmClient {
         let translated = format!("{}{}{}", leading_ws, cleaned, trailing_ws);
         let processing_time = start_time.elapsed().as_millis() as i32;
 
-        println!("[rewrit] LLM stream complete: {}ms, {} chars", processing_time, translated.len());
+        log::info!("[rewrit] LLM stream complete: {}ms, {} chars", processing_time, translated.len());
 
         let quota = QuotaInfo {
             used: 0, limit: i32::MAX, remaining: i32::MAX, resets_at: "Never".to_string(),

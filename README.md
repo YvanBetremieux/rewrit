@@ -73,6 +73,10 @@ Then macOS will ask for **Accessibility permissions** — this is required to ca
 
 All shortcuts are customizable in Settings.
 
+### Updates
+
+rewrit checks for updates at launch and every 24 hours, installs them in the background and offers to restart. **Settings › Updates** shows the installed version and has a **Check for updates…** button. Versions before 1.3.0 must be updated manually once. Details: [docs/UPDATES_AND_DEBUG.md](docs/UPDATES_AND_DEBUG.md).
+
 ## Tech Stack
 
 | Component | Technology |
@@ -165,6 +169,8 @@ All settings are stored in `~/.rewrit/`:
 | `quick_select_enabled` | Quick Select on/off |
 | `quick_select_shortcut` | Quick Select shortcut |
 | `device_id` | Anonymous device identifier |
+| `update_auto_check` / `update_auto_install` | Update preferences |
+| `update_last_check` | Last update check (RFC 3339) |
 
 ## Troubleshooting
 
@@ -175,7 +181,7 @@ Grant Accessibility permissions: **System Settings > Privacy & Security > Access
 Make sure Ollama is running: `ollama serve`
 
 ### Translation fails
-Check your API key in Settings. Try switching to another provider.
+Open **Settings › Diagnostics** and click **Test AI connection**: it shows the raw error from the provider (invalid key, retired model, quota…). Logs are in `~/Library/Logs/com.rewrit.app/rewrit.log` (**Open logs** button). See [docs/UPDATES_AND_DEBUG.md](docs/UPDATES_AND_DEBUG.md).
 
 ### App doesn't appear
 Look for the rewrit icon in your **system tray** (menu bar on macOS).

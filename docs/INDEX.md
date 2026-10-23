@@ -197,8 +197,9 @@ rewrit/
 
 ### J'ai un problème
 
-1. [`CHEAT_SHEET.md`](CHEAT_SHEET.md) - Dépannage express
-2. [`README.md`](README.md) - Section Troubleshooting
+1. [`UPDATES_AND_DEBUG.md`](UPDATES_AND_DEBUG.md) - Logs, diagnostics, mises à jour et releases
+2. [`CHEAT_SHEET.md`](CHEAT_SHEET.md) - Dépannage express
+3. [`README.md`](README.md) - Section Troubleshooting
 
 ---
 

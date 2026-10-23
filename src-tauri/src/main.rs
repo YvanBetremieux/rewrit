@@ -5,6 +5,7 @@ mod api_client;
 mod device_id;
 mod config;
 mod llm_client;
+mod updater;
 
 use api_client::ApiClient;
 use llm_client::{LlmClient, LlmProvider};
@@ -72,7 +73,7 @@ fn macos_keystroke(app: &AppHandle, key: &str) {
     let output = app.shell().command("osascript").args(["-e", &script]).output();
     if let Ok(result) = tauri::async_runtime::block_on(output) {
         if !result.stderr.is_empty() {
-            eprintln!("[rewrit] keystroke error: {}", String::from_utf8_lossy(&result.stderr));
+            log::error!("[rewrit] keystroke error: {}", String::from_utf8_lossy(&result.stderr));
         }
     }
 }
@@ -80,7 +81,7 @@ fn macos_keystroke(app: &AppHandle, key: &str) {
 #[cfg(target_os = "macos")]
 fn refocus_previous_app(app: &AppHandle, app_name: &str) {
     use tauri_plugin_shell::ShellExt;
-    println!("[rewrit] refocusing: {}", app_name);
+    log::info!("[rewrit] refocusing: {}", app_name);
     // Sanitize app_name to prevent AppleScript injection
     let safe_name = app_name.replace('\\', "\\\\").replace('"', "\\\"");
     let script = format!(
@@ -90,11 +91,11 @@ fn refocus_previous_app(app: &AppHandle, app_name: &str) {
     let output = app.shell().command("osascript").args(["-e", &script]).output();
     if let Ok(result) = tauri::async_runtime::block_on(output) {
         if !result.stderr.is_empty() {
-            eprintln!("[rewrit] refocus error: {}", String::from_utf8_lossy(&result.stderr));
+            log::error!("[rewrit] refocus error: {}", String::from_utf8_lossy(&result.stderr));
         }
     }
     thread::sleep(config::DELAY_CONFIG.after_refocus);
-    println!("[rewrit] refocus done");
+    log::info!("[rewrit] refocus done");
 }
 
 // --- Non-macOS helpers using Enigo ---
@@ -145,7 +146,7 @@ fn execute_paste(state: State<'_, AppState>, app: AppHandle) -> Result<(), Strin
     };
 
     let text = translated_text.ok_or("No translated text available")?;
-    println!("[rewrit] pasting {} chars", text.len());
+    log::info!("[rewrit] pasting {} chars", text.len());
 
     // Write to clipboard before hiding window
     use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -268,7 +269,7 @@ fn get_stream_response(state: State<'_, AppState>) -> Result<bool, String> {
 fn set_stream_response(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
     *state.stream_response.lock().unwrap() = enabled;
     device_id::set_stream_response(enabled)?;
-    println!("[rewrit] stream response: {}", enabled);
+    log::info!("[rewrit] stream response: {}", enabled);
     Ok(())
 }
 
@@ -294,7 +295,7 @@ fn set_quick_select_enabled(state: State<'_, AppState>, app: AppHandle, enabled:
         let _ = app.global_shortcut().unregister(shortcut);
     }
 
-    println!("[rewrit] quick select enabled: {}", enabled);
+    log::info!("[rewrit] quick select enabled: {}", enabled);
     Ok(())
 }
 
@@ -330,7 +331,7 @@ fn set_quick_select_shortcut(state: State<'_, AppState>, app: AppHandle, shortcu
     device_id::set_quick_select_shortcut(&new_shortcut)?;
     *state.quick_select_shortcut.lock().unwrap() = new_shortcut.clone();
 
-    println!("[rewrit] Quick Select shortcut changed to: {}", new_shortcut);
+    log::info!("[rewrit] Quick Select shortcut changed to: {}", new_shortcut);
     Ok(())
 }
 
@@ -373,7 +374,7 @@ fn execute_quick_select(
     *state.last_prompt.lock().unwrap() = Some(prompt.clone());
 
     let show_preview = *state.show_preview.lock().unwrap();
-    println!(
+    log::info!(
         "[rewrit] quick_select: lang={}, tone={}, preview={}",
         language, tone, show_preview
     );
@@ -470,7 +471,7 @@ fn execute_quick_select(
             let use_stream = *state.stream_response.lock().unwrap();
 
             if let Some(llm) = llm {
-                println!("[rewrit] direct paste: use_stream={}", use_stream);
+                log::info!("[rewrit] direct paste: use_stream={}", use_stream);
                 let result = if use_stream {
                     let app_for_chunks = app_clone.clone();
                     llm.execute_prompt_stream(text_clone, prompt, move |accumulated| {
@@ -580,7 +581,7 @@ pub fn handle_quick_select_trigger(app_handle: AppHandle) {
     {
         let mut is_processing = state.is_processing.lock().unwrap();
         if *is_processing {
-            println!("[rewrit] already processing, skipping quick select");
+            log::info!("[rewrit] already processing, skipping quick select");
             return;
         }
         *is_processing = true;
@@ -614,14 +615,14 @@ pub fn handle_quick_select_trigger(app_handle: AppHandle) {
             if let Ok(name) = String::from_utf8(result.stdout) {
                 let name = name.trim().to_string();
                 if !name.is_empty() && name != "rewrit" {
-                    println!("[rewrit] previous app: {}", name);
+                    log::info!("[rewrit] previous app: {}", name);
                     *state.previous_app.lock().unwrap() = Some(name);
                 }
             }
         }
 
         // Always copy (never cut) for quick select
-        println!("[rewrit] quick select: simulating Cmd+C");
+        log::info!("[rewrit] quick select: simulating Cmd+C");
         macos_keystroke(&app_handle, "c");
         thread::sleep(config::DELAY_CONFIG.after_copy);
     }
@@ -650,11 +651,11 @@ pub fn handle_quick_select_trigger(app_handle: AppHandle) {
 
     let clipboard_text = match clipboard_text {
         Some(t) => {
-            println!("[rewrit] quick select clipboard: {} chars", t.len());
+            log::info!("[rewrit] quick select clipboard: {} chars", t.len());
             t
         }
         None => {
-            println!("[rewrit] quick select: no text selected");
+            log::info!("[rewrit] quick select: no text selected");
             *state.is_processing.lock().unwrap() = false;
             return;
         }
@@ -684,7 +685,7 @@ pub fn handle_quick_select_trigger(app_handle: AppHandle) {
         {
             Ok(w) => w,
             Err(e) => {
-                eprintln!("[rewrit] failed to create quickselect window: {}", e);
+                log::error!("[rewrit] failed to create quickselect window: {}", e);
                 *state.is_processing.lock().unwrap() = false;
                 return;
             }
@@ -830,7 +831,7 @@ async fn set_llm_provider(provider: String, state: State<'_, AppState>) -> Resul
     // Ollama doesn't need an API key
     if !provider_enum.requires_api_key() {
         *state.llm_client.lock().unwrap() = Some(LlmClient::new(provider_enum.clone(), String::new()));
-        println!("✅ Switched to {} provider (local)", provider_enum.display_name());
+        log::info!("✅ Switched to {} provider (local)", provider_enum.display_name());
         return Ok(());
     }
 
@@ -844,11 +845,11 @@ async fn set_llm_provider(provider: String, state: State<'_, AppState>) -> Resul
     match api_key {
         Some(key) => {
             *state.llm_client.lock().unwrap() = Some(LlmClient::new(provider_enum.clone(), key));
-            println!("✅ Switched to {} provider", provider_enum.display_name());
+            log::info!("✅ Switched to {} provider", provider_enum.display_name());
         }
         None => {
             *state.llm_client.lock().unwrap() = None;
-            println!("⚠️  Switched to {} but no API key configured", provider_enum.display_name());
+            log::info!("⚠️  Switched to {} but no API key configured", provider_enum.display_name());
         }
     }
     Ok(())
@@ -879,13 +880,13 @@ async fn set_api_key(provider: String, key: String, state: State<'_, AppState>) 
             let env_var = format!("{}_API_KEY", provider_enum.as_str().to_uppercase());
             if let Some(env_key) = std::env::var(&env_var).ok().filter(|k| !k.is_empty()) {
                 *state.llm_client.lock().unwrap() = Some(LlmClient::new(provider_enum, env_key));
-                println!("✅ LLM client reverted to .env key");
+                log::info!("✅ LLM client reverted to .env key");
             } else {
                 *state.llm_client.lock().unwrap() = None;
             }
         } else {
             *state.llm_client.lock().unwrap() = Some(LlmClient::new(provider_enum, key));
-            println!("✅ LLM client updated with user API key");
+            log::info!("✅ LLM client updated with user API key");
         }
     }
 
@@ -899,7 +900,7 @@ async fn init_app(state: State<'_, AppState>) -> Result<(), String> {
     // Ollama doesn't need an API key
     if !provider.requires_api_key() {
         *state.llm_client.lock().unwrap() = Some(LlmClient::new(provider.clone(), String::new()));
-        println!("✅ {} client initialized (local)", provider.display_name());
+        log::info!("✅ {} client initialized (local)", provider.display_name());
         return Ok(());
     }
 
@@ -913,14 +914,79 @@ async fn init_app(state: State<'_, AppState>) -> Result<(), String> {
     match api_key {
         Some(key) => {
             *state.llm_client.lock().unwrap() = Some(LlmClient::new(provider.clone(), key));
-            println!("✅ {} client initialized", provider.display_name());
+            log::info!("✅ {} client initialized", provider.display_name());
             Ok(())
         }
         None => {
-            println!("⚠️  No API key configured for {} — waiting for user to set one in Settings", provider.display_name());
+            log::info!("⚠️  No API key configured for {} — waiting for user to set one in Settings", provider.display_name());
             Ok(())
         }
     }
+}
+
+// --- Diagnostics ---
+
+#[derive(Debug, Clone, Serialize)]
+struct Diagnostics {
+    version: String,
+    os: String,
+    arch: String,
+    provider: String,
+    model: Option<String>,
+    api_key_configured: bool,
+    config_dir: String,
+    log_dir: String,
+}
+
+#[tauri::command]
+fn get_diagnostics(app: AppHandle, state: State<'_, AppState>) -> Diagnostics {
+    let provider = LlmProvider::from_str(&device_id::get_llm_provider());
+    let model = state.llm_client.lock().unwrap().as_ref().map(|c| c.model().to_string());
+    Diagnostics {
+        version: app.package_info().version.to_string(),
+        os: std::env::consts::OS.to_string(),
+        arch: std::env::consts::ARCH.to_string(),
+        provider: provider.display_name().to_string(),
+        api_key_configured: model.is_some(),
+        model,
+        config_dir: device_id::get_config_dir().display().to_string(),
+        log_dir: app.path().app_log_dir().map(|p| p.display().to_string()).unwrap_or_default(),
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ConnectionTest {
+    ok: bool,
+    duration_ms: u128,
+    output: Option<String>,
+    error: Option<String>,
+}
+
+/// Send a tiny prompt to the active provider and report the raw result or error.
+#[tauri::command]
+async fn test_llm_connection(state: State<'_, AppState>) -> Result<ConnectionTest, String> {
+    let client = state.llm_client.lock().unwrap().clone()
+        .ok_or("No API key configured for the selected provider")?;
+    log::info!("[rewrit] diagnostics: testing LLM connection");
+    let start = std::time::Instant::now();
+    let result = client.execute_prompt("Hello world".to_string(), "Translate to French".to_string()).await;
+    let duration_ms = start.elapsed().as_millis();
+    Ok(match result {
+        Ok(r) => ConnectionTest { ok: true, duration_ms, output: r.translated_text, error: None },
+        Err(e) => {
+            log::error!("[rewrit] diagnostics: LLM connection failed: {}", e);
+            ConnectionTest { ok: false, duration_ms, output: None, error: Some(e) }
+        }
+    })
+}
+
+#[tauri::command]
+fn open_log_dir(app: AppHandle) -> Result<(), String> {
+    let dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let opener = if cfg!(target_os = "macos") { "open" } else if cfg!(target_os = "windows") { "explorer" } else { "xdg-open" };
+    std::process::Command::new(opener).arg(&dir).spawn().map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 // --- Ollama model management ---
@@ -1097,16 +1163,16 @@ async fn report_usage_to_backend(state: &State<'_, AppState>, app: &AppHandle) {
     if let Some(client) = api_client {
         match client.report_usage().await {
             Ok(quota) => {
-                println!("[rewrit] quota: {}/{}", quota.used, quota.limit);
+                log::info!("[rewrit] quota: {}/{}", quota.used, quota.limit);
                 let _ = app.emit("quota-updated", &quota);
                 let _ = app.emit("translation-completed", serde_json::json!({"quota": quota}));
             }
             Err(e) if e == "quota_exceeded" => {
-                println!("[rewrit] quota exceeded");
+                log::info!("[rewrit] quota exceeded");
                 let _ = app.emit("quota-exceeded", ());
             }
             Err(e) => {
-                println!("[rewrit] quota report failed (non-critical): {}", e);
+                log::info!("[rewrit] quota report failed (non-critical): {}", e);
             }
         }
     }
@@ -1119,7 +1185,7 @@ fn persist_shortcuts(shortcuts: &HashMap<String, ShortcutConfig>) {
         .map(|s| (s.shortcut.clone(), s.prompt.clone()))
         .collect();
     if let Err(e) = device_id::set_shortcuts(&entries) {
-        eprintln!("[rewrit] failed to persist shortcuts: {}", e);
+        log::error!("[rewrit] failed to persist shortcuts: {}", e);
     }
 }
 
@@ -1149,7 +1215,7 @@ fn find_prompt_for_shortcut(shortcuts: &HashMap<String, ShortcutConfig>, shortcu
 }
 
 fn handle_global_shortcut(app_handle: &AppHandle, shortcut_str: &str) {
-    println!("[rewrit] shortcut: {}", shortcut_str);
+    log::info!("[rewrit] shortcut: {}", shortcut_str);
     let state: State<AppState> = app_handle.state();
 
     // Find prompt for this shortcut
@@ -1161,7 +1227,7 @@ fn handle_global_shortcut(app_handle: &AppHandle, shortcut_str: &str) {
     let prompt = match prompt {
         Some(p) => p,
         None => {
-            println!("[rewrit] no prompt for shortcut");
+            log::info!("[rewrit] no prompt for shortcut");
             return;
         }
     };
@@ -1170,19 +1236,19 @@ fn handle_global_shortcut(app_handle: &AppHandle, shortcut_str: &str) {
     {
         let mut is_processing = state.is_processing.lock().unwrap();
         if *is_processing {
-            println!("[rewrit] already processing, skipping");
+            log::info!("[rewrit] already processing, skipping");
             return;
         }
         *is_processing = true;
     }
 
     let show_preview = *state.show_preview.lock().unwrap();
-    println!("[rewrit] prompt='{}', preview={}", &prompt[..prompt.len().min(50)], show_preview);
+    log::info!("[rewrit] prompt='{}', preview={}", &prompt[..prompt.len().min(50)], show_preview);
 
     // Wait for user to release modifier keys (Cmd+Alt from the shortcut)
     // Without this, simulating Cmd+C while Alt is still held sends Cmd+Alt+C
     {
-        println!("[rewrit] waiting for modifier key release...");
+        log::info!("[rewrit] waiting for modifier key release...");
         let mut enigo = Enigo::new(&Settings::default()).unwrap();
         // Release all modifiers to ensure clean state
         let _ = enigo.key(Key::Meta, enigo::Direction::Release);
@@ -1207,7 +1273,7 @@ fn handle_global_shortcut(app_handle: &AppHandle, shortcut_str: &str) {
             if let Ok(name) = String::from_utf8(result.stdout) {
                 let name = name.trim().to_string();
                 if !name.is_empty() && name != "rewrit" {
-                    println!("[rewrit] previous app: {}", name);
+                    log::info!("[rewrit] previous app: {}", name);
                     *state.previous_app.lock().unwrap() = Some(name);
                 }
             }
@@ -1215,7 +1281,7 @@ fn handle_global_shortcut(app_handle: &AppHandle, shortcut_str: &str) {
 
         // Copy (preview) or Cut (direct paste)
         let key = if show_preview { "c" } else { "x" };
-        println!("[rewrit] simulating Cmd+{}", key);
+        log::info!("[rewrit] simulating Cmd+{}", key);
         macos_keystroke(app_handle, key);
         thread::sleep(config::DELAY_CONFIG.after_copy);
     }
@@ -1245,11 +1311,11 @@ fn handle_global_shortcut(app_handle: &AppHandle, shortcut_str: &str) {
 
     let clipboard_text = match clipboard_text {
         Some(t) => {
-            println!("[rewrit] clipboard: {} chars", t.len());
+            log::info!("[rewrit] clipboard: {} chars", t.len());
             t
         }
         None => {
-            println!("[rewrit] clipboard empty after retries");
+            log::info!("[rewrit] clipboard empty after retries");
             *state.is_processing.lock().unwrap() = false;
             return;
         }
@@ -1413,15 +1479,15 @@ fn handle_global_shortcut(app_handle: &AppHandle, shortcut_str: &str) {
 pub fn run() {
     // Panic hook to capture crash info (panics on handler threads kill the app silently)
     std::panic::set_hook(Box::new(|panic_info| {
-        eprintln!("[rewrit] PANIC: {}", panic_info);
         let bt = std::backtrace::Backtrace::force_capture();
-        eprintln!("[rewrit] Backtrace:\n{}", bt);
+        eprintln!("[rewrit] PANIC: {}\n{}", panic_info, bt);
+        log::error!("[rewrit] PANIC: {}\nBacktrace:\n{}", panic_info, bt);
     }));
 
     dotenv::dotenv().ok();
 
     let device_id = device_id::get_device_id().expect("Failed to get device ID");
-    println!("[rewrit] Device ID: {}...{}", &device_id[..8], &device_id[device_id.len()-4..]);
+    log::info!("[rewrit] Device ID: {}...{}", &device_id[..8], &device_id[device_id.len()-4..]);
 
     let api_client = ApiClient::new(device_id.clone());
 
@@ -1447,6 +1513,20 @@ pub fn run() {
     };
 
     tauri::Builder::default()
+        // Logs go to stdout and to <log dir>/rewrit.log (see open_log_dir)
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .targets([
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                        file_name: Some("rewrit".to_string()),
+                    }),
+                ])
+                .level(log::LevelFilter::Info)
+                .max_file_size(2_000_000)
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepOne)
+                .build(),
+        )
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
@@ -1481,7 +1561,15 @@ pub fn run() {
             get_quick_select_shortcut,
             set_quick_select_shortcut,
             cancel_quick_select,
-            execute_quick_select
+            execute_quick_select,
+            get_diagnostics,
+            test_llm_connection,
+            open_log_dir,
+            updater::get_update_settings,
+            updater::set_update_auto_check,
+            updater::set_update_auto_install,
+            updater::check_for_update,
+            updater::install_update
         ])
         .setup(move |app| {
             #[cfg(target_os = "macos")]
@@ -1489,27 +1577,7 @@ pub fn run() {
                 app.set_activation_policy(tauri::ActivationPolicy::Regular);
             }
 
-            // Auto-update check (non-blocking, silent in background)
-            let handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                match tauri_plugin_updater::UpdaterExt::updater(&handle) {
-                    Ok(updater) => {
-                        match updater.check().await {
-                            Ok(Some(update)) => {
-                                println!("[rewrit] Update available: v{}", update.version);
-                                if let Err(e) = update.download_and_install(|_, _| {}, || {}).await {
-                                    eprintln!("[rewrit] Update install failed: {}", e);
-                                } else {
-                                    println!("[rewrit] Update installed, will apply on next restart");
-                                }
-                            }
-                            Ok(None) => println!("[rewrit] App is up to date"),
-                            Err(e) => eprintln!("[rewrit] Update check failed: {}", e),
-                        }
-                    }
-                    Err(e) => eprintln!("[rewrit] Updater init failed: {}", e),
-                }
-            });
+            updater::spawn_background_checks(app.handle().clone());
 
             // Pre-warm osascript to avoid cold start delay on first shortcut use
             #[cfg(target_os = "macos")]
@@ -1518,7 +1586,7 @@ pub fn run() {
                 let script = r#"return"#;
                 let output = app.handle().shell().command("osascript").args(["-e", script]).output();
                 let _ = tauri::async_runtime::block_on(output);
-                println!("✅ osascript warmed up");
+                log::info!("✅ osascript warmed up");
             }
 
             // Global shortcuts
@@ -1545,7 +1613,7 @@ pub fn run() {
                                         }
                                     }),
                                 ) {
-                                    eprintln!("[rewrit] handler panicked: {:?}", e);
+                                    log::error!("[rewrit] handler panicked: {:?}", e);
                                     let state: State<AppState> = handle.state();
                                     *state
                                         .is_processing
@@ -1570,7 +1638,7 @@ pub fn run() {
                     Ok(img) => {
                         let rgba = img.to_rgba8();
                         let (w, h) = rgba.dimensions();
-                        println!("✅ Loaded tray-icon.png ({}x{})", w, h);
+                        log::info!("✅ Loaded tray-icon.png ({}x{})", w, h);
                         Image::new_owned(rgba.into_raw(), w, h)
                     }
                     Err(_) => app.default_window_icon().unwrap().clone(),
@@ -1614,7 +1682,7 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            println!("✅ Tray icon created");
+            log::info!("✅ Tray icon created");
 
             // Register shortcuts (load persisted, or use defaults)
             {
@@ -1666,7 +1734,7 @@ pub fn run() {
                 .visible(false)
                 .build()
                 {
-                    println!("✅ Preview window pre-created (hidden)");
+                    log::info!("✅ Preview window pre-created (hidden)");
                     let _ = w;
                 }
 
@@ -1685,7 +1753,7 @@ pub fn run() {
                 .visible(false)
                 .build()
                 {
-                    println!("✅ Quick Select window pre-created (hidden)");
+                    log::info!("✅ Quick Select window pre-created (hidden)");
                     let _ = w;
                 }
 
@@ -1713,7 +1781,7 @@ pub fn run() {
                         let x = (size.width as f64 / scale) - 260.0;
                         let _ = w.set_position(tauri::LogicalPosition::new(x, 40.0));
                     }
-                    println!("✅ Progress window pre-created (hidden)");
+                    log::info!("✅ Progress window pre-created (hidden)");
                     let _ = w;
                 }
             }
@@ -1725,9 +1793,9 @@ pub fn run() {
                 let qs_shortcut = state.quick_select_shortcut.lock().unwrap().clone();
                 if let Ok(shortcut) = qs_shortcut.parse::<Shortcut>() {
                     if app.global_shortcut().register(shortcut).is_ok() {
-                        println!("✅ Quick Select shortcut registered ({})", qs_shortcut);
+                        log::info!("✅ Quick Select shortcut registered ({})", qs_shortcut);
                     } else {
-                        eprintln!("⚠️  Failed to register Quick Select shortcut");
+                        log::error!("⚠️  Failed to register Quick Select shortcut");
                     }
                 }
             }
@@ -1737,7 +1805,7 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 let state: State<AppState> = app_handle.state();
                 if let Err(e) = init_app(state).await {
-                    eprintln!("Failed to initialize LLM client: {}", e);
+                    log::error!("Failed to initialize LLM client: {}", e);
                 }
             });
 
@@ -1751,8 +1819,8 @@ pub fn run() {
                         else if cfg!(target_os = "windows") { "windows" }
                         else { "linux" };
                     match client.register(platform.to_string()).await {
-                        Ok(r) => println!("Registered with backend. Quota: {:?}", r.quota),
-                        Err(e) => println!("Backend registration skipped: {}", e),
+                        Ok(r) => log::info!("Registered with backend. Quota: {:?}", r.quota),
+                        Err(e) => log::info!("Backend registration skipped: {}", e),
                     }
                 }
             });
@@ -1786,9 +1854,9 @@ pub fn run() {
                                 // Force dock tile refresh so Cmd+Tab picks up the new icon
                                 let dock_tile: id = msg_send![ns_app, dockTile];
                                 let _: () = msg_send![dock_tile, display];
-                                println!("✅ macOS app icon set (Ready event)");
+                                log::info!("✅ macOS app icon set (Ready event)");
                             } else {
-                                eprintln!("❌ Failed to create NSImage from icon data");
+                                log::error!("❌ Failed to create NSImage from icon data");
                             }
                         }
                     }

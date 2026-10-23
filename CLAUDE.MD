@@ -4,7 +4,7 @@
 **rewrit** - AI-powered instant text transformation
 
 ## Description
-Desktop application that transforms text instantly via global keyboard shortcuts without leaving the current application. Built as a Tauri desktop app (Rust + Svelte) with a FastAPI backend. AI transformations are handled client-side via Groq API (LLaMA 3.3).
+Desktop application that transforms text instantly via global keyboard shortcuts without leaving the current application. Built as a Tauri desktop app (Rust + Svelte) with a FastAPI backend. AI transformations are handled client-side via Groq API (GPT-OSS 120B).
 
 **Tagline**: "L'IA au bout de tes doigts" - Instant, frictionless text transformation
 
@@ -21,7 +21,7 @@ Desktop application that transforms text instantly via global keyboard shortcuts
 - **Vite**: Build tool
 
 ### AI (Multi-provider, BYOK)
-- **Groq API**: LLaMA 3.3 70B (fastest)
+- **Groq API**: GPT-OSS 120B (`openai/gpt-oss-120b`, fastest; LLaMA 3.3 was retired by Groq)
 - **Mistral API**: Mistral Large
 - **Google Gemini API**: Gemini 2.5 Flash
 - **Ollama**: Local LLM (LLaMA 3.2 3B)

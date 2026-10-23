@@ -145,6 +145,47 @@ pub fn set_stream_response(enabled: bool) -> Result<(), String> {
         .map_err(|e| format!("Failed to save stream setting: {}", e))
 }
 
+fn get_bool(name: &str, default: bool) -> bool {
+    match fs::read_to_string(get_config_dir().join(name)) {
+        Ok(val) => val.trim() == "true",
+        Err(_) => default,
+    }
+}
+
+fn set_bool(name: &str, enabled: bool) -> Result<(), String> {
+    fs::write(get_config_dir().join(name), if enabled { "true" } else { "false" })
+        .map_err(|e| format!("Failed to save {}: {}", name, e))
+}
+
+pub fn get_update_auto_check() -> bool {
+    get_bool("update_auto_check", true)
+}
+
+pub fn set_update_auto_check(enabled: bool) -> Result<(), String> {
+    set_bool("update_auto_check", enabled)
+}
+
+pub fn get_update_auto_install() -> bool {
+    get_bool("update_auto_install", true)
+}
+
+pub fn set_update_auto_install(enabled: bool) -> Result<(), String> {
+    set_bool("update_auto_install", enabled)
+}
+
+/// RFC 3339 timestamp of the last successful update check
+pub fn get_update_last_check() -> Option<String> {
+    fs::read_to_string(get_config_dir().join("update_last_check"))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+pub fn set_update_last_check(timestamp: &str) -> Result<(), String> {
+    fs::write(get_config_dir().join("update_last_check"), timestamp)
+        .map_err(|e| format!("Failed to save last update check: {}", e))
+}
+
 pub fn get_quick_select_shortcut() -> String {
     let path = get_config_dir().join("quick_select_shortcut");
     if path.exists() {
