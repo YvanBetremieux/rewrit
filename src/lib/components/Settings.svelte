@@ -48,6 +48,9 @@
   let diagnostics = null;
   let connectionTest = null;
   let errorLogCount = null;
+  // null = not applicable (non-macOS)
+  let accessibilityGranted = null;
+  let accessibilityTimer = null;
   let isTestingConnection = false;
 
   // Check if we're in development mode
@@ -304,8 +307,11 @@
         loadQuickSelectEnabled(),
         loadShortcuts(),
         loadUpdateSettings(),
-        loadDiagnostics()
+        loadDiagnostics(),
+        refreshAccessibility()
       ]);
+      // Reflect the change as soon as the user ticks rewrit in System Settings
+      accessibilityTimer = setInterval(refreshAccessibility, 2000);
       unlistenUpdate = await listen('update-status', (event) => {
         updateState = event.payload;
         loadUpdateSettings();
@@ -315,7 +321,28 @@
     }
   });
 
-  onDestroy(() => unlistenUpdate?.());
+  onDestroy(() => {
+    unlistenUpdate?.();
+    clearInterval(accessibilityTimer);
+  });
+
+  // --- Accessibility (macOS) ---
+
+  async function refreshAccessibility() {
+    try {
+      accessibilityGranted = await invoke('accessibility_granted');
+    } catch (error) {
+      console.error('Failed to read accessibility status:', error);
+    }
+  }
+
+  async function openAccessibility() {
+    try {
+      await invoke('open_accessibility_settings');
+    } catch (error) {
+      showToast(String(error), 'error', 3000);
+    }
+  }
 
   // --- Updates ---
 
@@ -1080,6 +1107,27 @@
         <h2 class="text-base font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
           <span>🩺</span> Diagnostics
         </h2>
+
+        {#if accessibilityGranted !== null}
+          <div class="flex items-center justify-between gap-3 mb-3 rounded-lg p-3 {accessibilityGranted ? 'bg-green-50 dark:bg-green-900/20' : 'bg-yellow-50 dark:bg-yellow-900/20'}">
+            <div>
+              <p class="text-sm font-medium {accessibilityGranted ? 'text-green-800 dark:text-green-200' : 'text-yellow-800 dark:text-yellow-200'}">
+                {accessibilityGranted ? '✓ Accessibility granted' : '⚠︎ Accessibility not granted'}
+              </p>
+              <p class="text-xs text-gray-600 dark:text-gray-400 mt-0.5">
+                {accessibilityGranted
+                  ? 'Needed to copy and paste for you.'
+                  : 'Remove rewrit with “–”, add it again with “+”, turn it on, then restart rewrit.'}
+              </p>
+            </div>
+            <button
+              on:click={openAccessibility}
+              class="flex-shrink-0 px-3 py-1.5 text-xs rounded transition-colors {accessibilityGranted ? 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600' : 'bg-blue-600 text-white hover:bg-blue-700'}"
+            >
+              Open Accessibility Settings
+            </button>
+          </div>
+        {/if}
 
         {#if diagnostics}
           <dl class="bg-gray-50 dark:bg-gray-700 rounded-lg p-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">

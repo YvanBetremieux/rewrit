@@ -51,6 +51,7 @@ npm run tauri build -- --bundles app   # doit produire rewrit.app.tar.gz.sig
 
 ### Réglages › Diagnostics
 
+- **Accessibility** (macOS) : état de l'autorisation, rafraîchi toutes les 2 s, et bouton **Open Accessibility Settings** qui ouvre directement Réglages Système › Confidentialité et sécurité › Accessibilité.
 - **Test AI connection** : envoie un petit prompt au fournisseur actif et affiche la réponse ou l'erreur brute de l'API (clé invalide, modèle retiré, quota…).
 - **Open logs** : ouvre le dossier des logs.
 - **Copy diagnostics** : copie version, OS, fournisseur, modèle, dossier de logs, dernière vérification de mise à jour et résultat du test.

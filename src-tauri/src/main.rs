@@ -112,11 +112,39 @@ fn report_accessibility_missing(app: &AppHandle) {
         .show(|open| {
             ACCESSIBILITY_DIALOG_OPEN.store(false, Ordering::SeqCst);
             if open {
-                let _ = std::process::Command::new("open")
-                    .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
-                    .spawn();
+                let _ = open_accessibility_settings();
             }
         });
+}
+
+#[cfg(target_os = "macos")]
+#[link(name = "ApplicationServices", kind = "framework")]
+extern "C" {
+    fn AXIsProcessTrusted() -> bool;
+}
+
+/// Whether rewrit may control the keyboard; None on systems without this permission
+#[tauri::command]
+fn accessibility_granted() -> Option<bool> {
+    #[cfg(target_os = "macos")]
+    return Some(unsafe { AXIsProcessTrusted() });
+    #[cfg(not(target_os = "macos"))]
+    None
+}
+
+/// Open System Settings › Privacy & Security › Accessibility
+#[tauri::command]
+fn open_accessibility_settings() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+            .spawn()
+            .map_err(|e| format!("Failed to open System Settings: {}", e))?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    Err("Accessibility settings only exist on macOS".to_string())
 }
 
 #[cfg(target_os = "macos")]
@@ -1728,6 +1756,8 @@ pub fn run() {
             test_llm_connection,
             open_log_dir,
             get_error_logs,
+            accessibility_granted,
+            open_accessibility_settings,
             get_model,
             list_models,
             set_model,
